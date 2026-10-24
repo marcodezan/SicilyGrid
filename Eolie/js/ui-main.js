@@ -3,6 +3,7 @@
    AVVIO, CICLO PRINCIPALE, INTESTAZIONE, ELENCO ISOLE, ALLARMI, EVENTI
    ===================================================================== */
 initSim();
+if (ECO.want) { let sv = null; try { const c = JSON.parse(localStorage.getItem('eolie.cfg') || '{}'); if (c.resume) sv = JSON.parse(localStorage.getItem('eolie.save') || 'null'); } catch (e) { } ecoStart(sv && sv.net === NET_CFG.net ? sv : null); }
 UI.sel = S.islById[UI.isl];
 
 /* ---------- dimensionamento ---------- */
@@ -17,9 +18,12 @@ resize(); sldEvents();
 
 /* ---------- schede ---------- */
 function showCtab(t) {
+  const pane = t === 'dash' || t === 'eco';
   UI.ctab = t; document.querySelectorAll('#ctabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); $('tip').style.display = 'none';
-  $('dash').classList.toggle('on', t === 'dash'); $('bFit').style.display = t === 'dash' ? 'none' : ''; if ($('mapBar')) $('mapBar').style.display = t === 'map' ? 'flex' : 'none'; if ($('zoomBar')) $('zoomBar').style.display = t === 'dash' ? 'none' : 'flex'; if (typeof ctxClose === 'function') ctxClose();
-  if (t === 'dash') { $('banner').style.display = 'none'; buildDash(); }
+  $('dash').classList.toggle('on', t === 'dash'); $('eco').classList.toggle('on', t === 'eco'); $('bFit').style.display = pane ? 'none' : ''; if ($('mapBar')) $('mapBar').style.display = t === 'map' ? 'flex' : 'none'; if ($('zoomBar')) $('zoomBar').style.display = pane ? 'none' : 'flex'; if (typeof ctxClose === 'function') ctxClose();
+  if (pane) $('banner').style.display = 'none';
+  if (t === 'dash') buildDash();
+  if (t === 'eco' && typeof buildEco === 'function') buildEco();
 }
 function showBtab(t) { if (!UI.lay.bottom || UI.lay.max === 'center') { UI.lay.bottom = true; UI.lay.max = null; applyLayout(); } UI.btab = t; document.querySelectorAll('#btabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); document.querySelectorAll('.bp').forEach(p => p.classList.toggle('on', p.id === 'bp-' + t)); if (t === 'alm') renderAlarms(true); if (t === 'soe') renderSoe(true); }
 document.querySelectorAll('#ctabs [data-tab]').forEach(b => b.onclick = () => showCtab(b.dataset.tab));
@@ -72,7 +76,8 @@ function refreshIslList(force) {
     $('ilf_' + I.id).textContent = !I.com ? 'N.D.' : live ? (A.grid ? '50.000' : b.fm.toFixed(3)) + ' Hz' : 'BUIO';
     $('ilf_' + I.id).style.color = !live ? COL.al : Math.abs(b.fm - 50) > 0.2 ? COL.wa : '';
     const L = I.nodes.reduce((a, N) => a + (N.live ? N.Pl : 0), 0), on = I.gens.filter(g => g.st === 'IN PARALLELO').length;
-    $('ila_' + I.id).textContent = fP(L) + ' · ' + on + '/' + I.gens.length + ' GE' + (I.bess.length ? ' · SoC ' + I.bess[0].soc.toFixed(0) + '%' : '');
+    $('ila_' + I.id).textContent = fP(L) + ' · ' + on + '/' + I.gens.length + ' GE' + (I.bess.length ? ' · ' + I.bess[0].soc.toFixed(0) + '%' : '');
+    $('ila_' + I.id).title = I.bess.length ? 'carico servito · gruppi in servizio · stato di carica dell\'accumulo' : 'carico servito · gruppi in servizio';
     $('ilb_' + I.id).textContent = !I.com ? 'RTU N.D.' : !live ? 'FUORI TENSIONE' : A.grid ? 'RTN' : A.isl.length > 1 ? 'parallelo' : I.ems.on ? 'EMS' : 'MANUALE';
   });
 }
@@ -128,7 +133,8 @@ function settings() {
     ${SEC('Domanda e meteo', PSET(PIN('S.set|demand', 'Fattore di domanda', '× 1', 0.05), PSEL('S.set|weather', 'Meteo', [['sereno', 'Sereno'], ['variabile', 'Variabile'], ['coperto', 'Coperto'], ['temporale', 'Temporale']])))}
     </div><div>
     ${SEC('Imprevisti casuali', PSET(PSEL('S.set|randF', 'Frequenza guasti casuali', [[0, 'nessuno'], [1, 'rari'], [2, 'frequenti'], [3, 'molto frequenti']]), PIN('S.set|repT', 'Durata interventi squadra', 's', 5), PCK('S.set|prot', 'Protezioni elettriche attive')))}
-    ${SEC('Simulazione', ROW('<button class="btn dg" data-a="restart">Riavvia da capo</button>') + '<p class="note">Il riavvio ricostruisce rete e stato iniziale (ore 11:30 del 10 agosto).</p>')}
+    ${SEC('Rete delle isole', PSET(`<label>Configurazione</label><span><select id="stNet"><option value="rinnovabile" ${NET_CFG.net === 'rinnovabile' ? 'selected' : ''}>Rinnovabile (FV che copre il picco, accumulo su ogni isola)</option><option value="storico" ${NET_CFG.net === 'storico' ? 'selected' : ''}>Storica (poco FV, pochi accumuli)</option></select></span>`) + ROW('<button class="btn" data-a="setNet">Applica e riavvia</button>') + '<p class="note">Nella rete rinnovabile il FV di ogni isola, a mezzogiorno con cielo sereno, copre il picco di domanda della giornata; gli accumuli spostano il surplus verso la sera.</p>')}
+    ${SEC('Simulazione', ROW('<button class="btn dg" data-a="restart">Riavvia da capo</button>') + '<p class="note">Il riavvio ricostruisce rete e stato iniziale (ore 11:30 del 10 agosto)' + (ECO.on ? ' e fa ripartire da zero la partita di gestione' : '') + '.</p>')}
     </div></div>`);
   document.querySelectorAll('#mBody input[data-pk], #mBody select[data-pk]').forEach(n => { const v = getPK(n.dataset.pk); if (n.type === 'checkbox') n.checked = !!v; else n.value = v; });
 }
@@ -140,13 +146,17 @@ ACT.setTime = () => {
   soe(null, 'Orologio impostato: ' + clkStr(S.clk) + ' del ' + dateStr(S.doy), 1);
   closeModal();
 };
-ACT.restart = () => { location.reload(); };
+function cfgPut(c) { try { const o = JSON.parse(localStorage.getItem('eolie.cfg') || '{}'); localStorage.setItem('eolie.cfg', JSON.stringify(Object.assign(o, c))); } catch (e) { } }
+ACT.restart = () => { if (ECO.on) { cfgPut({ resume: false }); ECO.on = false; try { localStorage.removeItem('eolie.save'); } catch (e) { } } location.reload(); };
+ACT.setNet = () => { const v = $('stNet').value; if (ECO.on) { toast('In modalità gestione la rete si sceglie all\'inizio della partita (menu → Modalità gestione)'); return; } cfgPut({ net: v }); location.reload(); };
 
 /* ---------- guida ---------- */
 function help() {
   modal('Guida rapida', `<div class="help">
   <h4>Che cosa è simulato</h4>
   <p>Otto reti isolane delle Eolie a 20 kV (Lipari e Vulcano collegate da due cavi, Salina, Panarea, Stromboli, la microrete di Ginostra, Filicudi, Alicudi). Ogni gruppo diesel è una macchina sincrona con inerzia, flusso di campo, regolatore di velocità (con limitatore del turbocompressore) e regolatore di tensione. Le reti sono risolte in corrente alternata ogni millisecondo; i guasti trifase, bifase e monofase a terra sono calcolati con le componenti di sequenza (neutro isolato o compensato con bobina di Petersen). Dati di rete indicativi, non ufficiali.</p>
+  <h4>Rete rinnovabile e modalità gestione</h4>
+  <p>Nella rete predefinita il fotovoltaico di ogni isola, a mezzogiorno con cielo sereno, copre il picco di domanda della giornata e ogni isola ha un accumulo che sposta il surplus verso la sera (la rete storica, con poco FV, si sceglie dalle Impostazioni). Nella <b>modalità gestione</b> (menu) incassi per l'energia fornita in proporzione alla qualità del servizio, paghi gasolio, manutenzione e penali, e con il margine costruisci FV, accumuli, gruppi e cavi tra le isole; decidi tu come usare gli accumuli e quanta riserva tenere accesa.</p>
   <h4>Come è organizzato</h4>
   <ul><li><b>Dashboard</b>: panoramica dell'arcipelago (clic su una scheda per la dashboard della singola isola), poi schema unifilare e mappa.</li>
   <li><b>Pannelli</b>: ogni pannello si chiude con «–», si ingrandisce con «⤢» e si riapre dai pulsanti Isole / Comandi / Strumenti in alto. Le sezioni dei pannelli si chiudono cliccando sul titolo.</li>
@@ -199,6 +209,7 @@ function frame(now) {
     else {
       updFace();
       if (UI.ctab === 'dash') { if (dashKey !== UI.dash) buildDash(); else updDash(); }
+      if (UI.ctab === 'eco' && typeof updEco === 'function') updEco();
       if (botVis) { if (UI.btab === 'alm') renderAlarms(); if (UI.btab === 'soe') renderSoe(); }
       if (S.rec.recs.length !== UI.nRecs) { UI.nRecs = S.rec.recs.length; if (UI.btab === 'scope' && !document.activeElement.closest('#scopeCtl')) buildScopeCtl(); }
     }

@@ -1,0 +1,49 @@
+/* =====================================================================
+   MODALITÀ GESTIONE — cassa, pannello economico, cantiere, piani
+   ===================================================================== */
+#eco { position: absolute; inset: 0; overflow: auto; display: none; background: var(--bg, #070b0f); }
+#eco.on { display: block; }
+.ecoIn { padding: 10px; min-height: 100%; zoom: var(--z); }
+.cash { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 10px; border-left: 1px solid var(--bd); border-right: 1px solid var(--bd); min-width: 118px; cursor: pointer; }
+.cash small { font-size: 9px; letter-spacing: .12em; color: var(--dim); }
+.cash b { font: 600 16px var(--mono); color: var(--hi); line-height: 1.1; }
+.cash i { font: 600 10px var(--mono); font-style: normal; }
+.cash:hover { background: #1d2329; }
+
+.ehead { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; margin-bottom: 10px; }
+.ecash { background: #1d2329; border: 1px solid var(--bd); padding: 8px 14px; min-width: 260px; }
+.ecash small { display: block; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.ecash b { display: block; font: 600 30px var(--mono); color: var(--hi); }
+.ecash span { font: 12px var(--mono); }
+.eacts { display: flex; gap: 6px; flex-wrap: wrap; align-content: center; }
+.eacts .btn { display: inline-flex; align-items: center; gap: 6px; }
+.ecoIn .ok, .ebuild .ok, table.dt td.ok { color: var(--ok); }
+.ecoIn .wa, .ebuild .wa { color: var(--wa); }
+.ecoIn .al, .ebuild .al, table.dt td.al { color: var(--al); }
+.ecash b.al { color: var(--al); } .ecash b.wa { color: var(--wa); }
+.dbox.wide { grid-column: 1 / -1; }
+.ecoIn table.dt tr.tot td { border-top: 1px solid var(--bd2); }
+.proj { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid #141d24; }
+.proj b { display: block; color: var(--hi); font-size: 12px; font-weight: 600; }
+.proj small { color: var(--dim); font-size: 11px; }
+.proj .lb { width: 120px; height: 8px; flex: none; }
+.proj .lb i { background: var(--mv); }
+.tip { border-left: 3px solid var(--wa); background: #221e12; color: #e9d9a8; padding: 5px 8px; margin: 4px 0; font-size: 12px; }
+ul.elist { margin: 0; padding-left: 16px; font-size: 12px; line-height: 1.45; color: var(--tx); }
+ul.elist li { margin: 3px 0; }
+
+/* cantiere e piani (nelle finestre) */
+.ebuild .ecashm { margin-bottom: 8px; color: var(--tx); }
+.ebuild .ecashm b { font-family: var(--mono); color: var(--hi); }
+.ebuild table.dt tr { cursor: default; }
+.ebuild td.row, .ebuild .row { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.btn.armed { background: #5a3d0c !important; border-color: var(--wa) !important; color: #ffe2a0 !important; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.sec.plan .bd .row { margin: 4px 0; }
+.sec.plan h5 { display: flex; justify-content: space-between; gap: 10px; }
+.sec.plan h5 span:last-child { font: 11px var(--mono); color: var(--tx); text-transform: none; letter-spacing: 0; }
+table.ems input[type=number] { width: 62px; }
+table.ems tr { cursor: default; }
+#mBody select { max-width: 100%; }
+@media (max-width: 700px) { .ecash { min-width: 0; flex: 1; } .ecash b { font-size: 24px; } }
+.ecoIn canvas { width: 100%; display: block; }

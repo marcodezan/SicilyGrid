@@ -4,10 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Eolie Grid · Centro di controllo</title>
-<link rel="stylesheet" href="css/scada.css?v=31">
-<link rel="stylesheet" href="css/ux.css?v=31">
-<link rel="stylesheet" href="css/icons.css?v=31">
-<link rel="stylesheet" href="css/pro.css?v=31">
+<link rel="stylesheet" href="css/scada.css?v=32">
+<link rel="stylesheet" href="css/ux.css?v=32">
+<link rel="stylesheet" href="css/icons.css?v=32">
+<link rel="stylesheet" href="css/pro.css?v=32">
+<link rel="stylesheet" href="css/eco.css?v=32">
 </head>
 <body>
 <div id="app">
@@ -23,6 +24,7 @@
     <div class="kpis" id="kpis" hidden></div>
     <span class="hsp"></span>
     <button class="search" id="bSearch" title="Cerca isole, componenti, imprevisti e comandi (Ctrl+K)"><i class="ico ico-search"></i> <span>Cerca</span><kbd>Ctrl K</kbd></button>
+    <div class="cash" id="cash" style="display:none" title="Cassa della gestione · clic per il conto economico"><small>CASSA</small><b id="cashV">—</b><i id="cashR"></i></div>
     <div class="score" id="score" title="Punteggio e qualità del servizio · clic per il dettaglio"><small>PUNTI</small><b id="scPts">0</b><i id="scGrade">A</i></div>
     <button id="bAlm" class="btn alm" title="Allarmi da riconoscere · clic per l'elenco"><i class="ico ico-bell"></i> <b id="almN">0</b></button>
     <button id="emsBadge" class="btn wa" data-a="emsAll" title="Automazione disinserita: clic per reinserirla su tutte le isole" style="display:none"></button>
@@ -36,6 +38,8 @@
         <button class="mi" data-a="ptog" data-p="bottom" id="dk-bottom"><i></i>Strumenti (oscilloscopio, trend, eventi)</button>
         <div class="mlab">Automazione</div>
         <button class="mi" id="bEms" data-a="emsAll"></button>
+        <div class="mlab">Modalità di gioco</div>
+        <button class="mi" id="bGame" data-a="gameMode"><i class="ico ico-euro"></i> Modalità gestione (budget e cantieri)</button>
         <div class="mlab">Simulazione</div>
         <button class="mi" id="bSlow">Moviola</button>
         <button class="mi" id="bMode" data-a="mode">BASE</button>
@@ -60,12 +64,13 @@
       <button data-tab="dash" class="on"><i class="ico ico-dashboard"></i> Dashboard</button>
       <button data-tab="sld"><i class="ico ico-schema"></i> Schema unifilare</button>
       <button data-tab="map"><i class="ico ico-map"></i> Mappa rete</button>
+      <button data-tab="eco" id="tabEco" style="display:none"><i class="ico ico-euro"></i> Gestione</button>
       <span class="sp"></span>
       <span id="islTitle"></span>
       <button id="bFit" title="Adatta lo schema alla finestra"><i class="ico ico-fit"></i></button>
       <span class="pb"><button data-a="pmax" data-p="center" title="Ingrandisci / ripristina"><i class="ico ico-expand"></i></button></span>
     </div>
-    <div class="cv" id="cvWrap"><canvas id="cv"></canvas><div id="tip"></div><div id="banner"></div><div id="dash"></div></div>
+    <div class="cv" id="cvWrap"><canvas id="cv"></canvas><div id="tip"></div><div id="banner"></div><div id="dash"></div><div id="eco"></div></div>
   </section>
 
   <aside id="right" class="panel">
@@ -99,20 +104,22 @@
 <div id="tour" class="hidden"><div id="tourHole"></div><div id="tourCard"></div></div>
 <div id="splash"><div><span class="logo">EG</span><b>EOLIE GRID</b><small>Avvio della simulazione</small></div></div>
 
-<script src="js/geo.js?v=31"></script>
-<script src="js/data.js?v=31"></script>
-<script src="js/engine.js?v=31"></script>
-<script src="js/prot.js?v=31"></script>
-<script src="js/ctrl.js?v=31"></script>
-<script src="js/rec.js?v=31"></script>
-<script src="js/ui-core.js?v=31"></script>
-<script src="js/scen.js?v=31"></script>
-<script src="js/ui-sld.js?v=31"></script>
-<script src="js/ui-map.js?v=31"></script>
-<script src="js/ui-face.js?v=31"></script>
-<script src="js/ui-scope.js?v=31"></script>
-<script src="js/ui-dash.js?v=31"></script>
-<script src="js/ui-main.js?v=31"></script>
-<script src="js/ui-ux.js?v=31"></script>
+<script src="js/geo.js?v=32"></script>
+<script src="js/data.js?v=32"></script>
+<script src="js/engine.js?v=32"></script>
+<script src="js/prot.js?v=32"></script>
+<script src="js/ctrl.js?v=32"></script>
+<script src="js/eco.js?v=32"></script>
+<script src="js/rec.js?v=32"></script>
+<script src="js/ui-core.js?v=32"></script>
+<script src="js/scen.js?v=32"></script>
+<script src="js/ui-sld.js?v=32"></script>
+<script src="js/ui-map.js?v=32"></script>
+<script src="js/ui-face.js?v=32"></script>
+<script src="js/ui-scope.js?v=32"></script>
+<script src="js/ui-dash.js?v=32"></script>
+<script src="js/ui-main.js?v=32"></script>
+<script src="js/ui-ux.js?v=32"></script>
+<script src="js/ui-eco.js?v=32"></script>
 </body>
 </html>

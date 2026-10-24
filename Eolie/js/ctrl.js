@@ -19,6 +19,7 @@ function startGen(G, by) {
   if (G.st !== 'FERMO') return false;
   G.stopReq = false; G.fref = 50; G.Vref = 1.0; G.ig = 0; G.ia = 0; G.Eq = 0.03; G.d = rnd() * 6.28; G.boost = 0; G.rack = 0;
   setGenSt(G, 'PRELUBRIFICAZIONE');
+  G.starts = (G.starts || 0) + 1;
   if (by === 'OP') G.asyn = false;
   soe(G.isl, 'Avviamento ' + G.nm + ' (' + (by === 'EMS' ? 'EMS' : 'operatore') + ')', 1, G);
   return true;
@@ -190,7 +191,7 @@ function sendCrew(el) {
   const live = S.faults.some(f => f.el === el && f.on) || (el.el === 'seg' && (el.dn.live && (el.dn.via === el || (el.sw && el.sw.closed && (el.up ? el.up.live : el.fd.live))))) || (el.el === 'tie' && (el.a.live || (el.b.live && el.sw.closed))) || (el.el === 'node' && el.live && S.faults.some(f => f.el === el && f.loc === 'node')) || (el.el === 'br' && (devClosed(el.brkA) || (el.brkB && devClosed(el.brkB)))) || (el.el === 'bus' && el.live) || (el.el === 'gen' && devClosed(el.brk) && el.fault.shaft) || (el.st !== undefined && el.relays && el.stuck && !el.racked && devClosed(el));
   if (live) { soe(el.isl || (I && I.id), 'Squadra NON inviata su ' + el.nm + ': l\'impianto è ancora in tensione — isolare e mettere in sicurezza prima', 2, el); S.lastRefuse = { t: S.t, id: el.id, msg: 'impianto in tensione: isolare prima dell\'intervento' }; return false; }
   const T = el.el === 'isl' ? 25 : el.el === 'gen' ? S.set.repT * 1.3 : S.set.repT;
-  S.crews.push({ el, t: T, T });
+  S.crews.push({ el, t: T, T }); S.crewN = (S.crewN || 0) + 1;
   soe(I ? I.id : null, 'Squadra di pronto intervento inviata: ' + el.nm + ' (≈' + Math.round(T) + ' s)', 1, el);
   return true;
 }
@@ -297,14 +298,33 @@ function emsStep(dt) {
       st.on.forEach(g => { if (g.auto && g.mode === 'BASE') { g.Pset += (g.Pn * 0.32 - g.Pset) * Math.min(1, dt / 10); g.Vref = clamp(g.Vref + clamp(0.25 * g.Pe - g.Qe, -0.5, 0.5) / g.Sn * 0.02 * dt, 0.95, 1.08); } });
       if (st.on.length > (hot ? 1 : 0) && E.uc) { const sm = st.on.filter(g => g.auto).sort((a, b) => a.Pn - b.Pn)[0]; if (sm && E.tStart <= 0) { stopGen(sm, 'EMS'); E.tStart = 10; E.last = 'arresto ' + sm.short + ': alimentazione da RTN'; } }
     } else if (gfm.length) {
-      /* microrete con accumulo grid-forming: il diesel ricarica la batteria */
-      const b = gfm[0];
+      /* accumulo grid-forming che forma la rete: i diesel lavorano a potenza impostata,
+         solo quando servono (batteria scarica o carico oltre la potenza dell'accumulo) e ricaricano la batteria */
       const run = st.on.filter(g => g.auto);
-      if ((b.soc < E.socLo || b.P > 0.9 * b.Pn) && !run.length) startOne(0, 'SoC ' + b.soc.toFixed(0) + '% / potenza BESS al limite');
-      run.forEach(g => { g.mode = 'BASE'; const tgt = clamp(st.load + 0.6 * b.Pn * (b.soc < E.socHi ? 1 : 0), 0.3 * g.Pn, 0.9 * g.Pn); g.Pset += (tgt - g.Pset) * Math.min(1, dt / 8); });
-      if (run.length && b.soc > E.socHi && E.tStart <= 0) { stopGen(run[0], 'EMS'); E.tStart = 20; E.last = 'arresto diesel: batteria carica'; }
+      const Pg = gfm.reduce((a, b) => a + b.Pn * (b.fault.derate ? 0.5 : 1), 0), soc = gfm.reduce((a, b) => a + b.soc * b.En, 0) / Math.max(1e-6, gfm.reduce((a, b) => a + b.En, 0));
+      const net = Math.max(0, st.load), ch = soc < E.socHi ? 0.5 * Pg : 0;
+      const capOn = run.reduce((a, g) => a + 0.9 * g.Pn * g.derate, 0);
+      /* l'avvio di un diesel richiede ~15 s: si parte con margine, guardando la potenza apparente dell'accumulo */
+      const sr = gfm.reduce((a, b) => Math.max(a, (b.P > 0 ? Math.hypot(b.P, b.Q) : Math.abs(b.Q)) / b.Sn), 0); /* solo in scarica */
+      let needD;
+      if (soc < E.socLo) needD = net + ch;
+      else if (run.length) needD = soc > E.socHi ? net - 0.7 * Pg : net + 0.5 * ch;
+      else needD = net - (soc > E.socHi ? 0.65 : 0.55) * Pg;
+      if (sr > 0.7) needD = Math.max(needD, net - 0.45 * Pg, capOn + 0.05);
+      /* batteria quasi piena: i diesel non devono caricarla oltre */
+      if (soc > 97) needD = Math.min(needD, Math.max(0, net - 0.1 * Pg));
+      needD = Math.max(0, needD);
+      A.need = needD;
+      if (needD > capOn + 0.02) { E.tLow = (E.tLow || 0) + dt; if (E.tLow > 2) startOne(needD - capOn, needD > 0 && soc < E.socLo ? 'SoC ' + soc.toFixed(0) + '%: ricarica dell\'accumulo' : 'potenza dell\'accumulo al limite'); }
+      else E.tLow = 0;
+      run.forEach(g => { g.mode = 'BASE'; const tgt = clamp(capOn > 0 ? needD * 0.9 * g.Pn * g.derate / capOn : 0, 0.3 * g.Pn, 0.9 * g.Pn); g.Pset += (tgt - g.Pset) * Math.min(1, dt / 8); });
+      if (run.length && E.tStart <= 0 && !starting.length) {
+        const sm = run.slice().sort((a, b) => a.Pn - b.Pn)[0];
+        if (capOn - 0.9 * sm.Pn >= needD * 1.15 || (needD === 0 && soc > E.socHi)) { E.tHigh = (E.tHigh || 0) + dt; if (E.tHigh > 15) { stopGen(sm, 'EMS'); E.tHigh = 0; E.tStart = 20; E.last = needD === 0 ? 'arresto diesel: batteria carica' : 'arresto ' + sm.short + ': potenza in eccesso'; } }
+        else E.tHigh = 0;
+      }
       /* limitazione FV con batteria piena */
-      if (E.pvCurt) { S.isl.filter(x => A.isl.indexOf(x.id) >= 0).forEach(x => { if (b.soc > 96 && b.P < -0.02 * b.Pn) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (b.soc < 93 || b.P > 0) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.05 * dt); }); }
+      if (E.pvCurt) { S.isl.filter(x => A.isl.indexOf(x.id) >= 0).forEach(x => { if ((soc > 94 && gfm.some(b => b.P < -0.02 * b.Pn)) || (A.f > 50.3 && soc > 90)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.1 * dt); else if (soc < 91 || gfm.some(b => b.P > 0.02 * b.Pn)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.05 * dt); }); }
     } else {
       /* isola alimentata da gruppi diesel */
       const isls = S.isl.filter(x => A.isl.indexOf(x.id) >= 0), pvA = isls.reduce((a, x) => a + x.pv.P, 0);
@@ -358,7 +378,7 @@ function emsStep(dt) {
       /* limitazione FV per minimo tecnico dei diesel, solo se gli accumuli non possono assorbire altro */
       if (E.pvCurt) {
         const room = E.bess && st.B.some(b => b.mode === 'GFL' && b.auto && b.soc < (E.socMax || 95) - 1 && b.Pset > -0.95 * b.Pn * (b.fault.derate ? 0.5 : 1));
-        isls.forEach(x => { if (ld < 0.22 || (ld < 0.28 && !room)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (ld > 0.36 || (room && ld > 0.3)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.03 * dt); });
+        isls.forEach(x => { if (ld < 0.25 || (ld < 0.33 && !room)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (ld > 0.41 || (room && ld > 0.36)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.03 * dt); });
         isls.forEach(x => { if (x.pv.curtEms < 0.98 && !x._curtLog) { x._curtLog = true; soe(x.id, 'EMS ' + x.nm + ': limitazione del FV per tenere i diesel sopra il minimo tecnico', 1, x); } else if (x.pv.curtEms >= 0.999) x._curtLog = false; });
       }
     }
@@ -481,6 +501,7 @@ function ctrlStep(dt) {
   if (S.emsAcc >= 1) { S.emsAcc = 0; emsStep(1); }
   processAlarms();
   totalsStep(dt);
+  if (typeof ECO !== 'undefined' && ECO.on) ecoStep(dt);
   crewsStep(dt);
   randomFaults(dt);
   if (S.storm > 0) S.storm -= dt;

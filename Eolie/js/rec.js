@@ -11,28 +11,44 @@ function W3(b, o, a, c, z, k) {
   if (z) { b[o + 4] = z.r * k; b[o + 5] = z.i * k; } else { b[o + 4] = 0; b[o + 5] = 0; }
 }
 function W0(b, o) { b[o] = 0; b[o + 1] = 0; b[o + 2] = 0; b[o + 3] = 0; b[o + 4] = 0; b[o + 5] = 0; }
+function sigBus(I, bs) { return [{ id: bs.id + '.V', nm: 'Tensione ' + bs.nm, isl: I.id, kind: 'V', el: bs, h: [0.012, 0.008], w: (b, o) => W3(b, o, bs.V, bs.V2, bs.V0, VPH) }]; }
+function sigGen(I, G) {
+  return [{ id: G.id + '.VM', nm: G.short + ' tensione lato macchina', isl: I.id, kind: 'V', el: G, h: [0.006, 0.004], w: (b, o) => {
+    if (devClosed(G.brk) && G.bus.live) W3(b, o, G.bus.V, G.bus.V2, null, VPH);
+    else { const m = G.Eq * G.w * VPH; b[o] = m * Math.cos(G.d); b[o + 1] = m * Math.sin(G.d); b[o + 2] = 0; b[o + 3] = 0; b[o + 4] = 0; b[o + 5] = 0; }
+  } }, { id: G.id + '.I', nm: G.short + ' corrente', isl: I.id, kind: 'I', el: G, h: [0.015, 0.01], w: (b, o) => {
+    if (!(devClosed(G.brk) && G.bus.live)) return W0(b, o);
+    const v2 = G.bus.V2, k = G.Sn / (G.x2 + G.xt) * IB;
+    b[o] = G.I.r * IB; b[o + 1] = G.I.i * IB;
+    /* i2 = -V2 / (j X2) = j V2 / X2 */
+    b[o + 2] = v2 ? -v2.i * k : 0; b[o + 3] = v2 ? v2.r * k : 0; b[o + 4] = 0; b[o + 5] = 0;
+  } }];
+}
+function sigBess(I, B) { return [{ id: B.id + '.I', nm: B.short + ' corrente', isl: I.id, kind: 'I', el: B, h: [0.025, 0.015], w: (b, o) => { if (devClosed(B.brk) && B.bus.live && B.I) W3(b, o, B.I, null, null, IB); else W0(b, o); } }]; }
+function sigFdr(I, F) { return [{ id: F.id + '.I', nm: F.short + ' ' + F.nm.replace('Linea ', '') + ' corrente', isl: I.id, kind: 'I', el: F, h: [0.06, 0.035], w: (b, o) => W3(b, o, F.I1, F.I2, F.I0, IB) }]; }
+function sigBr(br) { return [{ id: br.id + '.I', nm: br.nm + ' corrente', isl: br.kind === 'hv' ? br.b.isl : br.a.isl || br.b.isl, kind: 'I', el: br, h: [0.02, 0.01], w: (b, o) => { if (brClosed(br) && br.Iph) W3(b, o, br.Iph, null, null, IB); else W0(b, o); } }]; }
 function recSignals() {
   const L = [];
   S.isl.forEach(I => {
-    I.buses.forEach(bs => L.push({ id: bs.id + '.V', nm: 'Tensione ' + bs.nm, isl: I.id, kind: 'V', el: bs, h: [0.012, 0.008], w: (b, o) => W3(b, o, bs.V, bs.V2, bs.V0, VPH) }));
-    I.gens.forEach(G => {
-      L.push({ id: G.id + '.VM', nm: G.short + ' tensione lato macchina', isl: I.id, kind: 'V', el: G, h: [0.006, 0.004], w: (b, o) => {
-        if (devClosed(G.brk) && G.bus.live) W3(b, o, G.bus.V, G.bus.V2, null, VPH);
-        else { const m = G.Eq * G.w * VPH; b[o] = m * Math.cos(G.d); b[o + 1] = m * Math.sin(G.d); b[o + 2] = 0; b[o + 3] = 0; b[o + 4] = 0; b[o + 5] = 0; }
-      } });
-      L.push({ id: G.id + '.I', nm: G.short + ' corrente', isl: I.id, kind: 'I', el: G, h: [0.015, 0.01], w: (b, o) => {
-        if (!(devClosed(G.brk) && G.bus.live)) return W0(b, o);
-        const v2 = G.bus.V2, k = G.Sn / (G.x2 + G.xt) * IB;
-        b[o] = G.I.r * IB; b[o + 1] = G.I.i * IB;
-        /* i2 = -V2 / (j X2) = j V2 / X2 */
-        b[o + 2] = v2 ? -v2.i * k : 0; b[o + 3] = v2 ? v2.r * k : 0; b[o + 4] = 0; b[o + 5] = 0;
-      } });
-    });
-    I.bess.forEach(B => L.push({ id: B.id + '.I', nm: 'BESS corrente', isl: I.id, kind: 'I', el: B, h: [0.025, 0.015], w: (b, o) => { if (devClosed(B.brk) && B.bus.live && B.I) W3(b, o, B.I, null, null, IB); else W0(b, o); } }));
-    I.feeders.forEach(F => L.push({ id: F.id + '.I', nm: F.short + ' ' + F.nm.replace('Linea ', '') + ' corrente', isl: I.id, kind: 'I', el: F, h: [0.06, 0.035], w: (b, o) => W3(b, o, F.I1, F.I2, F.I0, IB) }));
+    I.buses.forEach(bs => L.push(...sigBus(I, bs)));
+    I.gens.forEach(G => L.push(...sigGen(I, G)));
+    I.bess.forEach(B => L.push(...sigBess(I, B)));
+    I.feeders.forEach(F => L.push(...sigFdr(I, F)));
   });
-  S.br.forEach(br => L.push({ id: br.id + '.I', nm: br.nm + ' corrente', isl: br.kind === 'hv' ? br.b.isl : br.a.isl || br.b.isl, kind: 'I', el: br, h: [0.02, 0.01], w: (b, o) => { if (brClosed(br) && br.Iph) W3(b, o, br.Iph, null, null, IB); else W0(b, o); } }));
+  S.br.forEach(br => L.push(...sigBr(br)));
   return L;
+}
+/* componenti aggiunti o dismessi durante la partita (modalità Gestione) */
+function recAddEl(el) {
+  const R = S.rec; if (!R) return;
+  const I = S.islById[el.isl];
+  const L = el.el === 'gen' ? sigGen(I, el) : el.el === 'bess' ? sigBess(I, el) : el.el === 'br' ? sigBr(el) : [];
+  L.forEach(sg => { sg.buf = new Float32Array(REC_N * 6); R.sigs.push(sg); R.byId[sg.id] = sg; });
+  if (el.el === 'gen' && S.tf) ['P', 'Q', 'w'].forEach(k => { S.tf.ser[el.id + '.' + k] = new Float32Array(TF_N); });
+}
+function recRemoveEl(el) {
+  const R = S.rec; if (!R) return;
+  R.sigs = R.sigs.filter(sg => { if (sg.el === el) { delete R.byId[sg.id]; return false; } return true; });
 }
 function recReset() {
   S.rec = { idx: 0, n: 0, t: new Float64Array(REC_N), sigs: recSignals(), pend: [], recs: [], recN: 0 };

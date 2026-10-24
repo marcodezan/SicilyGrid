@@ -190,8 +190,8 @@ function sldDraw() {
         const c = !I.com ? '#7d8a95' : B2.blocked ? COL.al : !B2.run || B2.mode === 'OFF' ? COL.dim : B2.soc < 15 ? COL.wa : COL.ok;
         g.fillStyle = '#071015'; g.fillRect(x - W / 2, by2 - H / 2, W, H); g.strokeStyle = c; g.lineWidth = 2; g.strokeRect(x - W / 2, by2 - H / 2, W, H); g.fillStyle = c; g.fillRect(x + W / 2, by2 - 4 * k, 3 * k, 8 * k);
         g.fillRect(x - W / 2 + 2, by2 - H / 2 + 2, (W - 4) * clamp(B2.soc / 100, 0, 1), H - 4);
-        txt(g, 'BESS ' + (B2.Pn * 1000).toFixed(0) + ' kW · ' + B2.mode, x, by2 - H / 2 - 18 * k, COL.hi, '600 11px ' + FONTS, 'center');
-        txt(g, I.com ? 'SoC ' + B2.soc.toFixed(1) + '%' : 'N.D.', x, by2 - H / 2 - 5 * k, c, '9px ' + FONTM, 'center');
+        txt(g, B2.short + ' · ' + (B2.Pn * 1000).toFixed(0) + ' kW', x, by2 - H / 2 - 18 * k, COL.hi, '600 11px ' + FONTS, 'center');
+        txt(g, I.com ? B2.mode + ' · SoC ' + B2.soc.toFixed(0) + '%' : 'N.D.', x, by2 - H / 2 - 5 * k, c, '9px ' + FONTM, 'center');
         if (I.com && devClosed(B2.brk)) txt(g, (B2.P >= 0 ? '▲ ' : '▼ ') + fP(Math.abs(B2.P)), x + 13, yb - 16 * z, B2.P >= 0 ? COL.hi : '#c9a2ff', '10px ' + FONTM);
         if (crewOn(B2)) wrench(g, x - W, by2, crewOn(B2).t);
         ring(B2, x - W / 2, by2 - H / 2, W, BY - by2 + H / 2 - 4);

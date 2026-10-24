@@ -156,6 +156,44 @@ function netVariant(base, kind) {
   return net;
 }
 
+/* creazione di gruppi, accumuli e cavi (anche a simulazione in corso, modalità Gestione) */
+function mkGen(I, gd, k) {
+  const p = Object.assign(genDefaults(gd.Pn), gd);
+  const G = Object.assign(p, {
+    nm: 'GE' + (k + 1) + ' ' + I.nm, short: 'GE' + (k + 1), isl: I.id, bus: S.busById[gd.bus], el: 'gen',
+    st: 'FERMO', stT: 0, w: 0, d: 0, Eq: 0.0, Efd: 0, rack: 0, boost: 0, ig: 0, ia: 0, Pe: 0, Qe: 0, Pm: 0, I: ZERO, Ia: 0,
+    mode: 'ISO', fref: 50, Pset: 0, Vref: 1.0, auto: true, Tc: 30, Tex: 30, oil: 0, fuel: 0, hours: gd.hours !== undefined ? gd.hours : 2000 + Math.round(rnd() * 30000),
+    derate: 1, fault: {}, blocked: false, lastTrip: '', asyn: false, frefTgt: null, pef: 0
+  });
+  G.brk = mkBrk(G.id + '.Q', 'Interruttore ' + G.short + ' ' + I.nm, I.id, 'gen', false, G);
+  S.gens.push(G); S.byId[G.id] = G; I.gens.push(G); G.bus.gens.push(G);
+  return G;
+}
+function mkBess(I, bd) {
+  const n = I.bess.length;
+  const B = {
+    id: bd.id, nm: 'BESS ' + I.nm + (n ? ' ' + (n + 1) : ''), short: 'BESS' + (n ? n + 1 : ''), isl: I.id, bus: S.busById[bd.bus], el: 'bess', Pn: bd.Pn, En: bd.En, Sn: bd.Pn * 1.1,
+    mode: bd.mode, run: true, soc: bd.soc !== undefined ? bd.soc : 70, P: 0, Q: 0, Pset: 0, Qset: 0, Vref: 1.0, Vctl: true,
+    Rf: 0.02, dbf: 0.03, Hsyn: 2.0, /* grid-following: droop, banda morta, inerzia sintetica */
+    Hv: 2.5, Rv: 0.02, Xv: 0.20, iso: true, ksec: 0.4, /* grid-forming */
+    w: 1, d: 0, E: 0, Ev: 0, Pref: 0, xvf: 1, ivi: 0, Esoft: 1, Imax: 1.3, Tcell: 24, cyc: bd.cyc !== undefined ? bd.cyc : 312, I: ZERO, fault: {}, blocked: false, auto: true, ovT: 0
+  };
+  B.brk = mkBrk(B.id + '.Q', 'Interruttore ' + B.nm, I.id, 'bess', false, B);
+  S.bess.push(B); S.byId[B.id] = B; I.bess.push(B); B.bus.bess.push(B);
+  return B;
+}
+function mkCable(c) {
+  const net = S.net, a = S.busById[c.a], b = S.busById[c.b];
+  let z, bsh, Imax;
+  if (c.t === 'hv') { z = cx(0.0003, 0.12 / c.mva + 0.0006); bsh = 0; Imax = c.mva * IB; }
+  else { const k = net.cond[c.t]; z = cx(k[1] * c.km / ZB, k[2] * c.km / ZB); bsh = WB * k[3] * 1e-6 * c.km * ZB; Imax = k[4]; }
+  const br = { id: c.id, nm: c.nm, kind: c.t === 'hv' ? 'hv' : 'cab', a, b, z, bsh, mva: c.mva, Imax, km: c.km, el: 'br', I: 0, load: 0, th: 0, Sa: ZERO, Sb: ZERO, planned: !c.on, isl: b.isl || a.isl, notBuilt: !!c.notBuilt };
+  br.brkA = mkBrk(c.id + '.QA', c.nm + ' · lato ' + (a.grid ? 'RTN' : a.nm), a.isl || b.isl, 'cab', c.on, br);
+  br.brkB = mkBrk(c.id + '.QB', c.nm + ' · lato ' + b.nm, b.isl, 'cab', c.on, br);
+  S.br.push(br); S.byId[c.id] = br; a.brs.push(br); b.brs.push(br);
+  return br;
+}
+
 function buildSim(net, seed) {
   S = {
     t: 0, clk: 11.5 * 3600, doy: 222, clkSpeed: 20, slow: 1, paused: false, n: 0, rs: seed || 20250810,
@@ -185,28 +223,8 @@ function buildSim(net, seed) {
       br.Imax = c.mva * IB; br.brkA = mkBrk(c.id + '.Q', c.nm, d.id, 'cpl', true, br); br.brkB = null;
       S.br.push(br); S.byId[c.id] = br; br.a.brs.push(br); br.b.brs.push(br);
     });
-    d.gens.forEach((gd, k) => {
-      const p = Object.assign(genDefaults(gd.Pn), gd);
-      const G = Object.assign(p, {
-        nm: 'GE' + (k + 1) + ' ' + d.nm, short: 'GE' + (k + 1), isl: d.id, bus: S.busById[gd.bus], el: 'gen',
-        st: 'FERMO', stT: 0, w: 0, d: 0, Eq: 0.0, Efd: 0, rack: 0, boost: 0, ig: 0, ia: 0, Pe: 0, Qe: 0, Pm: 0, I: ZERO, Ia: 0,
-        mode: 'ISO', fref: 50, Pset: 0, Vref: 1.0, auto: true, Tc: 30, Tex: 30, oil: 0, fuel: 0, hours: 2000 + Math.round(rnd() * 30000),
-        derate: 1, fault: {}, blocked: false, lastTrip: '', asyn: false, frefTgt: null, pef: 0
-      });
-      G.brk = mkBrk(G.id + '.Q', 'Interruttore ' + G.short + ' ' + d.nm, d.id, 'gen', false, G);
-      S.gens.push(G); S.byId[G.id] = G; I.gens.push(G); G.bus.gens.push(G);
-    });
-    d.bess.forEach(bd => {
-      const B = {
-        id: bd.id, nm: 'BESS ' + d.nm, short: 'BESS', isl: d.id, bus: S.busById[bd.bus], el: 'bess', Pn: bd.Pn, En: bd.En, Sn: bd.Pn * 1.1,
-        mode: bd.mode, run: true, soc: 70, P: 0, Q: 0, Pset: 0, Qset: 0, Vref: 1.0, Vctl: true,
-        Rf: 0.02, dbf: 0.03, Hsyn: 2.0, /* grid-following: droop, banda morta, inerzia sintetica */
-        Hv: 2.5, Rv: 0.02, Xv: 0.20, iso: true, ksec: 0.4, /* grid-forming */
-        w: 1, d: 0, E: 0, Ev: 0, Pref: 0, xvf: 1, ivi: 0, Esoft: 1, Imax: 1.3, Tcell: 24, cyc: 312, I: ZERO, fault: {}, blocked: false, auto: true, ovT: 0
-      };
-      B.brk = mkBrk(B.id + '.Q', 'Interruttore BESS ' + d.nm, d.id, 'bess', false, B);
-      S.bess.push(B); S.byId[B.id] = B; I.bess.push(B); B.bus.bess.push(B);
-    });
+    d.gens.forEach((gd, k) => mkGen(I, gd, k));
+    d.bess.forEach(bd => mkBess(I, bd));
     let pvk = 0;
     d.feeders.forEach(fd => {
       const F = {
@@ -259,16 +277,7 @@ function buildSim(net, seed) {
     I.coil = { on: d.neutral === 'comp', over: 0.10, loss: 0.04 };
   });
   /* cavi tra isole */
-  net.cables.forEach(c => {
-    const a = S.busById[c.a], b = S.busById[c.b];
-    let z, bsh, Imax;
-    if (c.t === 'hv') { z = cx(0.0003, 0.12 / c.mva + 0.0006); bsh = 0; Imax = c.mva * IB; }
-    else { const k = net.cond[c.t]; z = cx(k[1] * c.km / ZB, k[2] * c.km / ZB); bsh = WB * k[3] * 1e-6 * c.km * ZB; Imax = k[4]; }
-    const br = { id: c.id, nm: c.nm, kind: c.t === 'hv' ? 'hv' : 'cab', a, b, z, bsh, mva: c.mva, Imax, km: c.km, el: 'br', I: 0, load: 0, th: 0, Sa: ZERO, Sb: ZERO, planned: !c.on, isl: b.isl || a.isl };
-    br.brkA = mkBrk(c.id + '.QA', c.nm + ' · lato ' + (a.grid ? 'RTN' : a.nm), a.isl || b.isl, 'cab', c.on, br);
-    br.brkB = mkBrk(c.id + '.QB', c.nm + ' · lato ' + b.nm, b.isl, 'cab', c.on, br);
-    S.br.push(br); S.byId[c.id] = br; a.brs.push(br); b.brs.push(br);
-  });
+  net.cables.forEach(c => mkCable(c));
   return S;
 }
 
@@ -626,6 +635,8 @@ function bessStep(B, dt) {
   const onLine = isClosed(B.brk), bus = B.bus, A = bus.area;
   B.socLimDis = B.soc > 3; B.socLimCh = B.soc < 99;
   const Pmax = B.fault.derate ? B.Pn * 0.5 : B.Pn;
+  /* potenza di carica ridotta gradualmente vicino al pieno, di scarica vicino al vuoto */
+  const chLim = B.soc >= 99.5 ? 0 : Math.min(1, (99.5 - B.soc) / 3), disLim = B.soc <= 3 ? 0 : Math.min(1, (B.soc - 3) / 2);
   if (!B.run || B.mode === 'OFF') { B.P = 0; B.Q = 0; B.I = ZERO; }
   if (B.mode === 'GFM' && B.run) {
     /* macchina sincrona virtuale */
@@ -634,7 +645,7 @@ function bessStep(B, dt) {
       B.w += dt / (2 * B.Hv * B.Sn) * (Pref - B.P - (B.Sn / B.Rv) * (B.w - 1) * 1);
       if (B.iso && A.gens.filter(g => isClosed(g.brk) && g.mode === 'ISO').length === 0 && !A.grid) B.Pref += B.ksec * (1 - B.w) / B.Rv * B.Sn * dt * 2;
       else B.Pref += (B.Pset - B.Pref) * dt / 5;
-      B.Pref = clamp(B.Pref, B.socLimCh ? -Pmax : 0, B.socLimDis ? Pmax : 0);
+      B.Pref = clamp(B.Pref, -Pmax * chLim, Pmax * disLim);
       const ev = B.Vref - 0.03 * B.Q / B.Sn - bus.Vm;
       B.ivi = clamp(B.ivi + 6 * ev * dt, -0.35, 0.35);
       B.Ev = clamp(B.Vref + B.ivi, 0.5, 1.3);
@@ -649,7 +660,7 @@ function bessStep(B, dt) {
     if (Math.abs(df) > B.dbf) ffr = -(df - Math.sign(df) * B.dbf) / (B.Rf * 50) * B.Pn;
     const inert = -2 * B.Hsyn * (bus.rocof || 0) / 50 * B.Pn;
     let Pc = B.Pset + ffr + clamp(inert, -0.5 * B.Pn, 0.5 * B.Pn);
-    Pc = clamp(Pc, B.socLimCh ? -Pmax : 0, B.socLimDis ? Pmax : 0);
+    Pc = clamp(Pc, -Pmax * chLim, Pmax * disLim);
     B.P += (Pc - B.P) * dt / 0.12;
     let Qc = B.Qset + (B.Vctl ? clamp(8 * (B.Vref - bus.Vm), -1, 1) * B.Pn * 0.6 : 0);
     const qmax = Math.sqrt(Math.max(0, B.Sn * B.Sn - B.P * B.P));
@@ -866,7 +877,7 @@ function feederFast() {
   }
 }
 function slowStep(dt) {
-  if (!S.settling) S.clk += dt * S.clkSpeed;
+  if (!S.settling) { S.clk += dt * S.clkSpeed; S.tc = (S.tc || 0) + dt * S.clkSpeed; }
   if (S.clk >= 86400) { S.clk -= 86400; S.doy = S.doy % 365 + 1; }
   cloudsStep(dt);
   S.isl.forEach(I => { cloudStep(I, dt); pvGroupsStep(I, dt); });

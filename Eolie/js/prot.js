@@ -91,6 +91,7 @@ function canClose(b, by) {
     return [true, ''];
   }
   if (o.el === 'fdr') return [true, ''];
+  if (o.el === 'br' && o.notBuilt) return [false, 'collegamento non ancora realizzato (modalità Gestione: va costruito dal cantiere)'];
   const r25 = (b.relays || []).concat(o.relays || []).find(r => r.code === '25');
   const sd = syncData(b);
   if (!sd) return [true, ''];
@@ -302,6 +303,55 @@ function mkRel(el, code, nm, set, trips, opts) {
   (el.relays = el.relays || []).push(r);
   return r;
 }
+function protGen(G) {
+  const In = G.Sn * IB, T = [G.brk];
+  mkRel(G, '87G', 'Differenziale generatore', { t: 0.03 }, T);
+  mkRel(G, '51V', 'Massima corrente a ritenuta di tensione', { k: 1.4, t: 0.9 }, T);
+  mkRel(G, '32', 'Ritorno di energia', { P: 0.06, t: 3 }, T);
+  mkRel(G, '40', 'Perdita di eccitazione', { Q: 0.35, t: 1.0 }, T);
+  mkRel(G, '46', 'Squilibrio (sequenza inversa)', { I2: 0.15, t: 4 }, T);
+  mkRel(G, '78', 'Perdita di passo', { ang: 140 }, T);
+  mkRel(G, '81O', 'Massima frequenza', { f: 52.0, t: 2.0 }, T);
+  mkRel(G, '81U', 'Minima frequenza', { f: 47.0, t: 2.0 }, T);
+  mkRel(G, '59', 'Massima tensione', { V: 1.15, t: 1.5 }, T);
+  mkRel(G, '27', 'Minima tensione', { V: 0.70, t: 3.0 }, T);
+  mkRel(G, '12', 'Sovravelocità (arresto motore)', { w: 1.12 }, T);
+  mkRel(G, '26', 'Temperatura acqua motore (arresto)', { T: 98 }, T);
+  mkRel(G, '63', 'Pressione olio minima (arresto)', { p: 1.2, t: 2 }, T);
+  mkRel(G, '25', 'Controllo di sincronismo', { df: 0.2, dv: 0.08, dphi: 12, dead: true }, []);
+  G.In = In;
+}
+function protBess(B) {
+  const T = [B.brk];
+  mkRel(B, 'SPI', 'Protezione di interfaccia (81/27/59)', { fmin: 47.5, fmax: 51.5, vmin: 0.5, vmax: 1.15, tf: 0.1, tv: 0.6 }, T);
+  mkRel(B, 'BMS', 'Protezioni batteria (SoC, temperatura)', { soc: 1, T: 50 }, T);
+}
+function protBr(br) {
+  const T = [br.brkA].concat(br.brkB ? [br.brkB] : []);
+  if (br.kind === 'cpl') { mkRel(br, '51', 'Massima corrente congiuntore', { Is: Math.round(br.Imax * 1.2), tms: 0.15, curve: 'SI' }, T); }
+  else {
+    mkRel(br, '87L', 'Differenziale di linea (cavo)', { t: 0.04 }, T);
+    mkRel(br, '51', 'Massima corrente di riserva', { Is: Math.round(br.Imax * 1.25), tms: 0.15, curve: 'SI' }, T);
+    mkRel(br, '49', 'Immagine termica cavo', { k: 1.05, tau: 120 }, T);
+  }
+  br.brkA.relays.push(mkRel(br, '25', 'Controllo di sincronismo', { df: 0.12, dv: 0.08, dphi: 15, dead: true }, [], { side: 'A' }));
+  if (br.brkB) br.brkB.relays.push(br.brkA.relays[br.brkA.relays.length - 1]);
+}
+/* nuovo interruttore su una sbarra: entra nello schema della differenziale 87B */
+function bus87Add(bus, brk) {
+  const r = (bus.relays || []).find(x => x.code === '87B');
+  if (r && r.trips.indexOf(brk) < 0) { r.trips.push(brk); brk.relays.push(r); }
+}
+/* rimozione di un componente: relè, interruttori, voci di indice */
+function relRemoveEl(el) {
+  const mine = S.relays.filter(r => r.el === el);
+  S.relays = S.relays.filter(r => r.el !== el);
+  mine.forEach(r => { delete S.byId[r.id]; S.brks.forEach(b => { const i = b.relays.indexOf(r); if (i >= 0) b.relays.splice(i, 1); }); });
+}
+function brkRemove(b) {
+  S.brks = S.brks.filter(x => x !== b); delete S.byId[b.id];
+  S.relays.forEach(r => { const i = r.trips.indexOf(b); if (i >= 0) r.trips.splice(i, 1); });
+}
 function buildProt() {
   S.relays = [];
   S.isl.forEach(I => {
@@ -325,42 +375,11 @@ function buildProt() {
       mkRel(F, '81U', 'Alleggerimento carico (UFLS)', {}, [F.brk], { en: F.ufls > 0 });
       F.rel79 = mkRel(F, '79', 'Richiusura automatica', { t1: 0.5, t2: 15, rcl: 6 }, [], { en: F.recEn });
     });
-    I.gens.forEach(G => {
-      const In = G.Sn * IB, T = [G.brk];
-      mkRel(G, '87G', 'Differenziale generatore', { t: 0.03 }, T);
-      mkRel(G, '51V', 'Massima corrente a ritenuta di tensione', { k: 1.4, t: 0.9 }, T);
-      mkRel(G, '32', 'Ritorno di energia', { P: 0.06, t: 3 }, T);
-      mkRel(G, '40', 'Perdita di eccitazione', { Q: 0.35, t: 1.0 }, T);
-      mkRel(G, '46', 'Squilibrio (sequenza inversa)', { I2: 0.15, t: 4 }, T);
-      mkRel(G, '78', 'Perdita di passo', { ang: 140 }, T);
-      mkRel(G, '81O', 'Massima frequenza', { f: 52.0, t: 2.0 }, T);
-      mkRel(G, '81U', 'Minima frequenza', { f: 47.0, t: 2.0 }, T);
-      mkRel(G, '59', 'Massima tensione', { V: 1.15, t: 1.5 }, T);
-      mkRel(G, '27', 'Minima tensione', { V: 0.70, t: 3.0 }, T);
-      mkRel(G, '12', 'Sovravelocità (arresto motore)', { w: 1.12 }, T);
-      mkRel(G, '26', 'Temperatura acqua motore (arresto)', { T: 98 }, T);
-      mkRel(G, '63', 'Pressione olio minima (arresto)', { p: 1.2, t: 2 }, T);
-      mkRel(G, '25', 'Controllo di sincronismo', { df: 0.2, dv: 0.08, dphi: 12, dead: true }, []);
-      G.In = In;
-    });
-    I.bess.forEach(B => {
-      const T = [B.brk];
-      mkRel(B, 'SPI', 'Protezione di interfaccia (81/27/59)', { fmin: 47.5, fmax: 51.5, vmin: 0.5, vmax: 1.15, tf: 0.1, tv: 0.6 }, T);
-      mkRel(B, 'BMS', 'Protezioni batteria (SoC, temperatura)', { soc: 1, T: 50 }, T);
-    });
+    I.gens.forEach(G => protGen(G));
+    I.bess.forEach(B => protBess(B));
     I.buses.forEach(B => { mkRel(B, '87B', 'Differenziale di sbarra', { t: 0.06 }, busBreakers(B)); });
   });
-  S.br.forEach(br => {
-    const T = [br.brkA].concat(br.brkB ? [br.brkB] : []);
-    if (br.kind === 'cpl') { mkRel(br, '51', 'Massima corrente congiuntore', { Is: Math.round(br.Imax * 1.2), tms: 0.15, curve: 'SI' }, T); }
-    else {
-      mkRel(br, '87L', 'Differenziale di linea (cavo)', { t: 0.04 }, T);
-      mkRel(br, '51', 'Massima corrente di riserva', { Is: Math.round(br.Imax * 1.25), tms: 0.15, curve: 'SI' }, T);
-      mkRel(br, '49', 'Immagine termica cavo', { k: 1.05, tau: 120 }, T);
-    }
-    br.brkA.relays.push(mkRel(br, '25', 'Controllo di sincronismo', { df: 0.12, dv: 0.08, dphi: 15, dead: true }, [], { side: 'A' }));
-    if (br.brkB) br.brkB.relays.push(br.brkA.relays[br.brkA.relays.length - 1]);
-  });
+  S.br.forEach(br => protBr(br));
 }
 function relOperate(r, why) {
   r.op = true; r.led = true; r.last = why; r.tOp = S.t;

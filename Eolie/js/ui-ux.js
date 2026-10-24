@@ -236,10 +236,11 @@ function welcome() {
       <button class="wcard" data-a="wGo" data-p="tour"><span>${ICO('school')}</span><b>Tour guidato</b><small>Due minuti per scoprire l'interfaccia</small></button>
       <button class="wcard" data-a="wGo" data-p="play"><span>${ICO('bolt')}</span><b>Gestisci un imprevisto</b><small>Guasti, blackout e tempeste con obiettivo e punti</small></button>
       <button class="wcard" data-a="wGo" data-p="free"><span>${ICO('map')}</span><b>Esplora liberamente</b><small>Mappa interattiva, schema, oscilloscopio</small></button>
+      <button class="wcard" data-a="wGo" data-p="eco"><span>${ICO('euro')}</span><b>Modalità gestione</b><small>Budget, gasolio, cantieri: costruisci FV, accumuli e cavi</small></button>
     </div>
     <p class="note">Tasto destro sullo schema (o clic sulla mappa) per le azioni rapide · Ctrl+K per cercare · barra spaziatrice per la pausa.</p></div>`);
 }
-ACT.wGo = p => { try { localStorage.setItem('eolie.seen', '1'); } catch (e) { } closeModal(); if (p === 'tour') tourStart(); else if (p === 'play') scenMenu(); else { showCtab('map'); } };
+ACT.wGo = p => { try { localStorage.setItem('eolie.seen', '1'); } catch (e) { } closeModal(); if (p === 'tour') tourStart(); else if (p === 'play') scenMenu(); else if (p === 'eco') ACT.gameMode(); else { showCtab('map'); } };
 $('bHelp').onclick = () => modal('Aiuto', `<div class="wcards">
   <button class="wcard" data-a="wGo" data-p="tour"><span>${ICO('school')}</span><b>Tour guidato</b><small>Le parti dell'interfaccia</small></button>
   <button class="wcard" data-a="helpFull"><span>${ICO('book')}</span><b>Guida completa</b><small>Simulazione, procedure, convenzioni</small></button>
