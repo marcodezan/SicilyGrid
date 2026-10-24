@@ -2,7 +2,7 @@
 const fs = require('fs'), path = require('path');
 const files = ['data.js', 'engine.js', 'prot.js', 'ctrl.js', 'rec.js'];
 const src = files.map(f => fs.readFileSync(path.join(__dirname, '..', 'js', f), 'utf8')).join('\n;\n') +
-  '\nmodule.exports={get S(){return S},initSim,fastStep,injectFault,brkCmd,opBrk,startGen,stopGen,swCmd,equipFault,sendCrew,motorCmd,genAutoSync,genRaise,genSetMode,bessSet,relReset,fpiReset,DT,cabs,devClosed,isClosed,wrapPi,recSrc,nodeLoad,hourNow,topology,lvBrkCmd,alarmAck,brkRack,brkAutoSync,pvLimit,pvSwitch,pvNode,addCloud,nodeShade};';
+  '\nmodule.exports={get S(){return S},NET_CFG,netVariant,initSim,retime,fastStep,injectFault,brkCmd,opBrk,startGen,stopGen,swCmd,equipFault,sendCrew,motorCmd,genAutoSync,genRaise,genSetMode,bessSet,relReset,fpiReset,DT,cabs,devClosed,isClosed,wrapPi,recSrc,nodeLoad,hourNow,topology,lvBrkCmd,alarmAck,brkRack,brkAutoSync,pvLimit,pvSwitch,pvNode,addCloud,nodeShade};';
 const tmp = path.join(__dirname, '.bundle.js');
 fs.writeFileSync(tmp, src);
 const A = require(tmp);

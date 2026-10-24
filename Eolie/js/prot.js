@@ -421,7 +421,7 @@ const WHY = {
   g12: r => 'n=' + Math.round(r.el.w * r.el.rpm) + ' giri/min',
   g26: r => 'T acqua ' + r.el.Tc.toFixed(0) + ' °C',
   g63: r => 'p olio ' + r.el.oil.toFixed(1) + ' bar',
-  spi: r => r._why + ' (f=' + r.el.bus.fm.toFixed(2) + ' Hz, V=' + r.el.bus.Vm.toFixed(2) + ')',
+  spi: r => r._why + ' (f=' + (r.el.bus.fs || r.el.bus.fm).toFixed(2) + ' Hz, V=' + r.el.bus.Vm.toFixed(2) + ')',
   bms: r => { const B = r.el; return B.Tcell > r.set.T ? 'temperatura celle ' + B.Tcell.toFixed(0) + ' °C' : B.ovT > 1.5 ? 'sovraccarico convertitore' : B.fault.trip ? 'allarme BMS' : 'SoC esaurito'; },
   b87B: () => 'guasto in zona sbarra',
   l87L: () => 'corrente differenziale',
@@ -473,8 +473,10 @@ function protStep(dt) {
       case 'bess': {
         const B = e, on = devClosed(B.brk);
         if (c === 'SPI') {
-          const f = B.bus.fm, v = B.bus.Vm;
-          const why = !B.bus.live ? 'mancanza tensione' : f > p.fmax ? 'f>' + p.fmax : f < p.fmin ? 'f<' + p.fmin : v < p.vmin ? 'V<' + p.vmin : v > p.vmax ? 'V>' + p.vmax : '';
+          const f = B.bus.fs || B.bus.fm, v = B.bus.Vm;
+          /* sotto 0,5 pu la misura di frequenza non è affidabile: restano solo i criteri di tensione */
+          const fok = v > 0.5;
+          const why = !B.bus.live ? 'mancanza tensione' : fok && f > p.fmax ? 'f>' + p.fmax : fok && f < p.fmin ? 'f<' + p.fmin : v < p.vmin ? 'V<' + p.vmin : v > p.vmax ? 'V>' + p.vmax : '';
           r._why = why;
           relPick(r, on && !!why && !(B.mode === 'GFM' && !B.bus.live), why.charCodeAt(0) === 86 ? p.tv : p.tf, WHY.spi, dt);
         } else if (c === 'BMS') {

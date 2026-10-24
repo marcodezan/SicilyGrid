@@ -239,7 +239,7 @@ function snapIsland(I) { I.snapT = S.t; I.snapClk = S.clk; }
 function buildCtrl() {
   S.set.repT = 40;
   S.isl.forEach(I => {
-    I.ems = { on: true, uc: true, restore: true, pvCurt: true, bess: true, blackstart: true, n1: true, rPct: 0.2, rMin: Math.max(0.05, 0.4 * Math.max.apply(null, I.gens.map(g => g.Pn).concat([0]))), socLo: 30, socHi: 85, hotGrid: true, tStart: 0, tStop: 0, tRest: 0, last: '', agc: true };
+    I.ems = { on: true, uc: true, restore: true, pvCurt: true, bess: true, blackstart: true, n1: true, rPct: 0.2, rPv: 0.2, socMin: 25, socMax: 95, ldT: 0.42, rMin: Math.max(0.05, 0.4 * Math.max.apply(null, I.gens.map(g => g.Pn).concat([0]))), socLo: 30, socHi: 85, hotGrid: true, tStart: 0, tStop: 0, tRest: 0, last: '', agc: true };
   });
   S.tot = { E: { load: 0, dsl: 0, pv: 0, bess: 0, ens: 0, fuel: 0, imp: 0 }, cost: 0 };
 }
@@ -307,11 +307,15 @@ function emsStep(dt) {
       if (E.pvCurt) { S.isl.filter(x => A.isl.indexOf(x.id) >= 0).forEach(x => { if (b.soc > 96 && b.P < -0.02 * b.Pn) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (b.soc < 93 || b.P > 0) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.05 * dt); }); }
     } else {
       /* isola alimentata da gruppi diesel */
-      const need = Math.max(E.rPct * Math.max(st.D, 0), E.rMin);
+      const isls = S.isl.filter(x => A.isl.indexOf(x.id) >= 0), pvA = isls.reduce((a, x) => a + x.pv.P, 0);
+      /* riserva: quota del carico + quota della produzione FV (una nube può toglierla in pochi secondi) */
+      const need = Math.max(E.rPct * Math.max(st.D, 0) + (E.rPv || 0) * pvA, E.rMin);
       A.need = need;
       const maxPn = st.on.reduce((a, g) => Math.max(a, g.Pn * g.derate), 0);
       const bdis = st.B.reduce((a, b) => a + (b.soc > 25 ? b.Pn * 0.8 : 0), 0);
-      const n1ok = !E.n1 || st.on.length === 0 || (st.cap - maxPn + bdis) >= 0.95 * st.D;
+      /* N-1: la perdita del gruppo più grande dev'essere coperta, e serve comunque una seconda macchina
+         sincrona (un accumulo grid-following non tiene in piedi la rete da solo) */
+      const n1ok = !E.n1 || st.on.length === 0 || ((st.cap - maxPn + bdis) >= 0.95 * st.D && (st.on.length >= 2 || !avail.length && !starting.length));
       A.n1ok = n1ok;
       if (st.res < need || !n1ok) { E.tLow = (E.tLow || 0) + dt; if (E.tLow > 2) startOne(Math.max(need - st.res, 0.95 * st.D - (st.cap - maxPn + bdis)), st.res < need ? 'riserva ' + (st.res * 1000).toFixed(0) + ' kW < ' + (need * 1000).toFixed(0) + ' kW' : 'criterio N-1 non soddisfatto'); }
       else E.tLow = 0;
@@ -322,23 +326,39 @@ function emsStep(dt) {
         const load = st.pd, capAfter = st.cap - sm.Pn * sm.derate;
         const rest = st.on.filter(g => g !== sm), maxAfter = rest.reduce((a, g) => Math.max(a, g.Pn * g.derate), 0);
         const bdis = st.B.reduce((a, b) => a + (b.soc > 25 ? b.Pn * 0.8 : 0), 0);
-        const n1After = !E.n1 || (capAfter - maxAfter + bdis) >= 1.05 * st.D;
+        const n1After = !E.n1 || ((capAfter - maxAfter + bdis) >= 1.05 * st.D && rest.length >= 2);
         const pendingRestore = E.restore && areaFeeders(A).some(F => (!devClosed(F.brk) && ['UFLS', '27', 'EMS', 'BUS'].indexOf(F.shedBy) >= 0) || F.segs.some(sg => sg.sw && sg.sw.emsOpen && !sg.sw.closed));
         if (resAfter > need * 1.25 && load < capAfter * 0.8 && n1After && !pendingRestore) { E.tHigh = (E.tHigh || 0) + dt; if (E.tHigh > 25) { stopGen(sm, 'EMS'); E.tHigh = 0; E.tStart = 15; E.last = 'arresto ' + sm.short + ': riserva in eccesso'; soe(I.id, 'EMS ' + I.nm + ': arresto ' + sm.nm + ' (riserva in eccesso)', 1, sm); } }
         else E.tHigh = 0;
       }
-      /* gestione accumulo grid-following */
+      /* gestione accumulo grid-following:
+         - di giorno assorbe il surplus FV tenendo i diesel intorno al carico obiettivo (ldT)
+         - la sera e la notte restituisce l'energia, ripartita sulle ore fino all'alba
+         - in emergenza (diesel quasi al limite) sostiene la rete */
+      const ld = st.cap > 0 ? st.pd / st.cap : 1, gross = Math.max(0, st.load) + pvA;
+      const [ri] = sunTimes(), hh = hourNow(), toDawn = hh < ri ? ri - hh : 24 - hh + ri;
+      const sunUp = pvA > 0.15 * gross && pvA > 0.002;
       if (E.bess) st.B.forEach(b => {
         if (b.mode !== 'GFL' || !b.auto) return;
-        const ld = st.cap > 0 ? st.pd / st.cap : 1;
-        let tgt = 0;
-        if (b.soc < 45 && ld < 0.75) tgt = -0.35 * b.Pn; else if (ld > 0.9 && b.soc > 25) tgt = 0.6 * b.Pn; else if (b.soc > 90 && ld > 0.45) tgt = 0.2 * b.Pn;
-        b.Pset += (tgt - b.Pset) * Math.min(1, dt / 15);
+        const Pmax = b.Pn * (b.fault.derate ? 0.5 : 1);
+        let tgt, tau = 15;
+        if (ld > 0.92 && b.soc > 15) tgt = 0.8 * Pmax;
+        else if (sunUp) {
+          if (b.soc < (E.socMax || 95)) { const kk = ld < 0.32 ? 0.6 : 0.25; tgt = Math.min(0, b.Pset + kk * (ld - (E.ldT || 0.5)) * st.cap); if (ld < 0.32) tau = 4; }
+          else tgt = Math.max(0, b.Pset);
+        } else {
+          const Eav = Math.max(0, (b.soc - (E.socMin || 25)) / 100 * b.En * 0.95);
+          tgt = Math.min(0.9 * Pmax, Eav / Math.max(1, toDawn));
+          /* non portare i diesel sotto il minimo tecnico */
+          tgt = Math.max(0, Math.min(tgt, b.Pset + (ld - 0.38) * st.cap));
+        }
+        tgt = clamp(tgt, -Pmax, Pmax);
+        b.Pset += (tgt - b.Pset) * Math.min(1, dt / tau);
       });
-      /* limitazione FV per minimo tecnico dei diesel */
+      /* limitazione FV per minimo tecnico dei diesel, solo se gli accumuli non possono assorbire altro */
       if (E.pvCurt) {
-        const ld = st.cap > 0 ? st.pd / st.cap : 1, isls = S.isl.filter(x => A.isl.indexOf(x.id) >= 0);
-        isls.forEach(x => { if (ld < 0.28) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (ld > 0.36) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.03 * dt); });
+        const room = E.bess && st.B.some(b => b.mode === 'GFL' && b.auto && b.soc < (E.socMax || 95) - 1 && b.Pset > -0.95 * b.Pn * (b.fault.derate ? 0.5 : 1));
+        isls.forEach(x => { if (ld < 0.22 || (ld < 0.28 && !room)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (ld > 0.36 || (room && ld > 0.3)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.03 * dt); });
         isls.forEach(x => { if (x.pv.curtEms < 0.98 && !x._curtLog) { x._curtLog = true; soe(x.id, 'EMS ' + x.nm + ': limitazione del FV per tenere i diesel sopra il minimo tecnico', 1, x); } else if (x.pv.curtEms >= 0.999) x._curtLog = false; });
       }
     }
@@ -472,8 +492,64 @@ function ctrlStep(dt) {
 }
 
 /* ---------------- inizializzazione: stato di esercizio coerente ---------------- */
+/* impegno delle unità di un'area coerente con il carico attuale.
+   re = false: avvio della simulazione; re = true: riallineamento dopo un salto dell'orologio */
+function dispatchArea(A, re) {
+  if (!A.isl.length) return;
+  if (re && (!A.live || A.buses.some(b => b.lock))) return;
+  const gens = areaGens(A), bessA = areaBess(A), gfm = bessA.filter(b => b.mode === 'GFM' && (!re || devClosed(b.brk)));
+  let D = 0; A.buses.forEach(b => { if (!b.grid) { const L = busLoad(b); D += L.P - L.Ppv; } });
+  if (!re) bessA.forEach(b => { b.brk.st = 'C'; b.run = true; b.E = 1; b.Esoft = 1; b.w = 1; b.d = 0; b.Pset = 0; b.Pref = 0; });
+  else bessA.forEach(b => { if (b.mode === 'GFL') { b.Pset = 0; b.P = 0; } });
+  if (gfm.length) { gfm[0].Pref = D; gfm[0].P = D; return; }
+  if (A.grid) return;
+  const I = areaLead(A);
+  let PV = 0; A.isl.forEach(id => { PV += S.islById[id].pv.P; });
+  const need = Math.max(I.ems.rPct * Math.max(D, 0) + I.ems.rPv * PV, I.ems.rMin);
+  const run = []; let cap = 0;
+  /* la sezione B di Lipari alimenta Vulcano: i gruppi di Vulcano restano di riserva */
+  const ok = g => !g.blocked && !Object.keys(g.fault).some(k => g.fault[k]) && !g.brk.racked && !g.brk.stuck && !g.brk.failClose;
+  const cand = (A.isl.length > 1 ? gens.filter(g => g.isl !== 'VUL') : gens).filter(ok);
+  const sorted = cand.slice().sort((a, b) => b.Pn - a.Pn);
+  const bd = bessA.filter(b => b.run && (!re || devClosed(b.brk))).reduce((a, b) => a + b.Pn * 0.8, 0);
+  for (const g of sorted) {
+    const mx = run.reduce((a, x) => Math.max(a, x.Pn), 0);
+    if (run.length >= (I.ems.n1 && sorted.length > 1 ? 2 : 1) && cap >= D / 0.8 && cap - D >= need && cap - mx + bd >= 1.08 * D) break;
+    run.push(g); cap += g.Pn;
+  }
+  if (!run.length) return;
+  /* con molto FV: l'accumulo assorbe il surplus e, se non basta, si limita il FV, così i diesel restano sopra il minimo tecnico */
+  let Dd = D;
+  const gfl = bessA.filter(b => b.mode === 'GFL' && b.run && (!re || devClosed(b.brk)));
+  const chMax = gfl.reduce((a, b) => a + b.Pn * 0.9 * (b.soc < 95 ? 1 : 0), 0);
+  if (Dd < 0.5 * cap && chMax > 0) {
+    const ch = Math.min(0.5 * cap - Dd, chMax);
+    gfl.forEach(b => { if (b.soc < 95) b.Pset = b.P = -ch * b.Pn * 0.9 / chMax; });
+    Dd += ch;
+  }
+  if (Dd < 0.35 * cap && PV > 0) { const exc = 0.35 * cap - Dd; A.isl.forEach(id => { S.islById[id].pv.curtEms = clamp(1 - exc / PV, 0, 1); }); Dd = 0.35 * cap; }
+  if (re) gens.forEach(g => { if (run.indexOf(g) < 0 && g.st !== 'FERMO') { g.st = 'FERMO'; g.stT = 0; g.brk.st = 'O'; g.w = 0; g.Eq = 0; g.Pe = 0; g.Qe = 0; g.rack = 0; g.boost = 0; g.asyn = false; g.stopReq = false; S.topoDirty = true; } });
+  run.sort((a, b) => a.Pn - b.Pn);
+  run.forEach(g => {
+    const was = g.st === 'IN PARALLELO';
+    g.st = 'IN PARALLELO'; g.brk.st = 'C'; g.mode = 'ISO'; g.fref = 50; g.Vref = 1.0; g.parDone = true; g.byEms = true; g.stopReq = false; g.asyn = false;
+    if (!was) { g.w = re ? (g.bus.fm || 50) / 50 : 1; g.Eq = 1.08; g.d = (re ? g.bus.th : 0) + 0.05; g.ia = 2.0; g.Efd = 2.0; g.oil = 4.8; S.topoDirty = true; }
+    const p = Dd / cap; g.rack = p + 0.04; g.boost = g.rack; g.ig = g.rack; g.Tc = Math.max(g.Tc, 70 + 15 * p); g.Tex = 260 + 210 * p; g.Pe = p * g.Pn; g.pef = p;
+  });
+}
+/* salto dell'orologio (scenari, impostazioni): nuovo profilo di carico e sole, parco di produzione riallineato */
+function retime(clk, doy) {
+  S.clk = ((clk % 86400) + 86400) % 86400; if (doy) S.doy = doy;
+  const wasSettling = S.settling;
+  S.settling = true;
+  S.isl.forEach(I => { I.pv.curtEms = 1; I.pv.groups.forEach(g => { g.lfsmK = 1; }); islandFeederSolve(I); islandFeederSolve(I); });
+  S.areas.forEach(A => dispatchArea(A, true));
+  topology();
+  for (let k = 0; k < 2500; k++) fastStep(DT);
+  S.settling = wasSettling;
+}
 function initSim(seed) {
-  buildSim(NET, seed);
+  buildSim(netVariant(NET, NET_CFG.net), seed);
   buildProt(); buildCtrl();
   S.isl.forEach(I => { I.pvEl = { id: I.id + '.PV', el: 'pv', isl: I.id, nm: 'Fotovoltaico ' + I.nm, I }; S.byId[I.pvEl.id] = I.pvEl; });
   S.islById.GIN.pv.groups[1].frac = 0; S.islById.GIN.pv.groups[0].frac = 1;
@@ -483,31 +559,7 @@ function initSim(seed) {
   S.isl.forEach(I => I.buses.forEach(b => { b.V = cx(1, 0); b.Vm = 1; b.live = true; b.f = 50; b.fm = 50; }));
   S.isl.forEach(I => { islandFeederSolve(I); islandFeederSolve(I); });
   /* impegno iniziale delle unità per area */
-  S.areas.forEach(A => {
-    if (!A.isl.length) return;
-    const gens = areaGens(A), gfm = areaBess(A).filter(b => b.mode === 'GFM');
-    let D = 0; A.buses.forEach(b => { if (!b.grid) { const L = busLoad(b); D += L.P - L.Ppv; } });
-    areaBess(A).forEach(b => { b.brk.st = 'C'; b.run = true; b.E = 1; b.Esoft = 1; b.w = 1; b.d = 0; b.Pset = 0; b.Pref = 0; });
-    if (gfm.length) { gfm[0].Pref = D; gfm[0].P = D; return; }
-    const I = areaLead(A), need = Math.max(I.ems.rPct * D, I.ems.rMin);
-    const order = gens.slice().sort((a, b) => b.Pn - a.Pn);
-    const run = []; let cap = 0;
-    /* la sezione B di Lipari alimenta Vulcano: i gruppi di Vulcano restano di riserva */
-    const cand = order.filter(g => g.isl !== 'VUL');
-    const sorted = cand.slice().sort((a, b) => b.Pn - a.Pn);
-    const bd = areaBess(A).reduce((a, b) => a + b.Pn * 0.8, 0);
-    for (const g of sorted) {
-      const mx = run.reduce((a, x) => Math.max(a, x.Pn), 0);
-      if (cap >= D / 0.8 && cap - D >= need && cap - mx + bd >= 1.08 * D) break;
-      run.push(g); cap += g.Pn;
-    }
-    /* ottimizza: rimuovi le unità superflue partendo dalle più grandi se le piccole bastano */
-    run.sort((a, b) => a.Pn - b.Pn);
-    run.forEach(g => {
-      g.st = 'IN PARALLELO'; g.brk.st = 'C'; g.w = 1; g.Eq = 1.08; g.d = 0.05; g.mode = 'ISO'; g.fref = 50; g.Vref = 1.0; g.parDone = true; g.byEms = true;
-      const p = D / cap; g.rack = p + 0.04; g.boost = g.rack; g.ig = g.rack; g.ia = 2.0; g.Efd = 2.0; g.Tc = 70 + 15 * p; g.Tex = 260 + 210 * p; g.oil = 4.8; g.Pe = p * g.Pn; g.pef = p;
-    });
-  });
+  S.areas.forEach(A => dispatchArea(A, false));
   topology();
   /* nubi iniziali */
   for (let k = 0; k < 10; k++) addCloud(240 + rnd() * 100, -185 + rnd() * 80, 1.2 + rnd() * 3.5, 0.35 + rnd() * 0.4);

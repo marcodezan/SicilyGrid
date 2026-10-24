@@ -119,6 +119,43 @@ function mkSw(id, nm, isl, closed, kind) {
   S.sws.push(w); S.byId[id] = w; return w;
 }
 
+/* ====================== VARIANTI DELLA RETE ======================
+   'storico'     : dati originali (poco FV, accumuli solo su alcune isole)
+   'rinnovabile' : FV dimensionato perché a mezzogiorno con cielo sereno copra
+                   il picco giornaliero di domanda dell'isola; accumulo su ogni isola
+                   (potenza ≈ metà del picco, 3 ore di autonomia) per spostare
+                   il surplus del mezzogiorno verso la sera */
+const NET_CFG = { net: 'rinnovabile' };
+function islandPeakKw(d, doy) {
+  const keep = S; S = { doy: doy || 222 };
+  let pk = 0;
+  for (let h = 0; h < 24; h += 0.25) { let L = 0; d.feeders.forEach(f => f.nodes.forEach(n => { for (const k in n.loads) L += n.loads[k] * profile(k, h); })); if (L > pk) pk = L; }
+  const sun = sunTimes();
+  S = keep;
+  return { pk, gmax: sun[2] };
+}
+function netVariant(base, kind) {
+  const net = JSON.parse(JSON.stringify(base));
+  if (kind === 'storico') return net;
+  net.islands.forEach(d => {
+    const { pk, gmax } = islandPeakKw(d, 222);
+    /* resa a mezzogiorno con cielo sereno: kWp · G/1000 · 0.86 (perdite) */
+    const kwpTarget = pk / (gmax / 1000 * 0.86);
+    const nodes = []; d.feeders.forEach(f => f.nodes.forEach(n => { if (!n.motor) nodes.push(n); }));
+    const kwpOld = nodes.reduce((a, n) => a + (n.pv || 0), 0);
+    if (kwpTarget > kwpOld) {
+      const w = nodes.map(n => Object.values(n.loads).reduce((a, v) => a + v, 0)), wt = w.reduce((a, v) => a + v, 0) || 1;
+      nodes.forEach((n, k) => { n.pv = Math.max(n.pv || 0, Math.round(kwpTarget * w[k] / wt / 5) * 5); });
+    }
+    d.pvLegacyKw = kwpOld * 0.28; /* gli impianti nuovi rispettano la CEI 0-21: restano storici solo quelli già esistenti */
+    /* accumulo: potenza ≈ 50% del picco, 3 h di autonomia */
+    const Pn = Math.max(0.1, Math.round(pk * 0.5 / 50) * 50 / 1000), En = Math.round(Pn * 3 * 10) / 10;
+    if (d.bess.length) d.bess.forEach(b => { if (b.Pn < Pn) { b.Pn = Pn; b.En = Math.max(b.En, En); } });
+    else d.bess.push({ id: d.id + '.BESS', bus: d.buses[d.buses.length - 1].id, Pn, En, mode: 'GFL' });
+  });
+  return net;
+}
+
 function buildSim(net, seed) {
   S = {
     t: 0, clk: 11.5 * 3600, doy: 222, clkSpeed: 20, slow: 1, paused: false, n: 0, rs: seed || 20250810,
@@ -208,11 +245,12 @@ function buildSim(net, seed) {
       S.ties.push(T); I.ties.push(T); S.byId[T.id] = T;
     });
     /* FV distribuito: gruppi con tarature diverse della protezione di interfaccia */
+    const fLeg = d.pvLegacyKw !== undefined && pvk > 0 ? Math.min(0.28, d.pvLegacyKw / pvk) : 0.28;
     I.pv = {
       kwp: pvk, curt: 1, curtEms: 1, irr: 0, P: 0, Pav: 0, Tmod: 25,
       groups: [
-        { nm: 'Inverter CEI 0-21 (47.5–51.5 Hz)', frac: 0.72, fmin: 47.5, fmax: 51.5, vmin: 0.85, vmax: 1.15, tf: 0.1, tv: 0.4, lfsm: true, on: true, rcT: 0, ramp: 1, tripT: 0, why: '' },
-        { nm: 'Inverter con tarature storiche (49.7–50.3 Hz)', frac: 0.28, fmin: 49.7, fmax: 50.3, vmin: 0.80, vmax: 1.20, tf: 0.15, tv: 0.2, lfsm: false, on: true, rcT: 0, ramp: 1, tripT: 0, why: '' }
+        { nm: 'Inverter CEI 0-21 (47.5–51.5 Hz)', frac: 1 - fLeg, fmin: 47.5, fmax: 51.5, vmin: 0.85, vmax: 1.15, tf: 0.1, tv: 0.4, lfsm: true, on: true, rcT: 0, ramp: 1, tripT: 0, why: '' },
+        { nm: 'Inverter con tarature storiche (49.7–50.3 Hz)', frac: fLeg, fmin: 49.7, fmax: 50.3, vmin: 0.80, vmax: 1.20, tf: 0.15, tv: 0.2, lfsm: false, on: true, rcT: 0, ramp: 1, tripT: 0, why: '' }
       ]
     };
     /* capacità verso terra della rete MT (per guasti a terra) */
@@ -389,7 +427,7 @@ function islandFeederSolve(I) {
   /* 3) load-flow nodale (tensioni ai nodi) */
   const L = I.nodes.filter(N => N.live);
   const n = L.length;
-  I.feeders.forEach(F => { F.SlNew = ZERO; F.PpvNew = 0; });
+  I.feeders.forEach(F => { F.SlNew = ZERO; F.PpvNew = 0; F.PpvInjNew = 0; });
   if (n) {
     L.forEach((N, k) => { N.k = k; if (cabs(N.V) < 0.3) N.V = N.headBus.V; });
     const W = luBuf(n), ar = W.ar, ai = W.ai, br0 = W.br, bi0 = W.bi, VR = W.xr, VI = W.xi;
@@ -423,7 +461,12 @@ function islandFeederSolve(I) {
       }
       luSolve(n, ar, ai, W.piv, br0, bi0, VR, VI);
     }
-    L.forEach((N, k) => { N.V = cx(VR[k], VI[k]); N.Vm = Math.hypot(VR[k], VI[k]); });
+    L.forEach((N, k) => {
+      const vr = VR[k], vi = VI[k], vm = Math.hypot(vr, vi);
+      N.V = cx(vr, vi); N.Vm = vm;
+      /* potenza FV effettivamente immessa alla tensione calcolata (inverter limitati in corrente a 1,1 In) */
+      N.PpvInj = N.Ppv > 0 ? N.Ppv * Math.min(1, 1.1 * vm) : 0;
+    });
     /* correnti nei tratti e potenze di testa linea */
     heads.forEach(F => {
       const N = F.nodes[0], sg = F.segs[0];
@@ -433,11 +476,12 @@ function islandFeederSolve(I) {
     });
   }
   /* quota FV attribuita alla linea che alimenta il nodo (per il modello rapido) */
-  I.nodes.forEach(N => { if (N.live && N.sup) N.sup.PpvNew += N.Ppv; });
+  I.nodes.forEach(N => { if (N.live && N.sup) { N.sup.PpvNew += N.Ppv; N.sup.PpvInjNew += N.PpvInj || 0; } });
   I.feeders.forEach(F => {
     if (!F.live) { F.Sl = ZERO; F.Ppv = 0; F.P = 0; F.Q = 0; return; }
     /* Sl = assorbimento netto + FV (il FV è trattato a potenza costante nel modello rapido) */
-    F.Ppv = F.PpvNew; F.Sl = cadd(F.SlNew, cx(F.Ppv, 0));
+    /* Sl = assorbimento dei carichi alla tensione Vr (testa linea + FV realmente immesso) */
+    F.Ppv = F.PpvNew; F.Sl = cadd(F.SlNew, cx(F.PpvInjNew, 0));
   });
   /* correnti nei tratti (per indicatori e sovraccarichi) */
   I.segs.forEach(sg => {
@@ -720,6 +764,8 @@ function areaSolve(A, dt) {
       b.fm += (b.f - b.fm) * dt / 0.06;
     }
     if (b.grid) { b.f = 50; b.fm = 50; }
+    /* frequenza per le protezioni di interfaccia (finestra di misura ≈ 150 ms, insensibile ai salti di fase) */
+    b.fs = b.fs > 1 ? b.fs + (b.fm - b.fs) * dt / 0.15 : b.fm;
     b.th = th; b.live = true;
     b.loadP = LD[i].P - LD[i].Ppv;
   });
@@ -753,7 +799,7 @@ function areaSolve(A, dt) {
 function srcFreq(A) { if (A.grid) return 50; const g = A.gens.find(x => genRunning(x)); if (g) return g.w * 50; const b = A.gfm[0]; return b ? b.w * 50 : 50; }
 function areaDead(A) {
   A.live = false; A.flt = [];
-  A.buses.forEach(b => { if (b.grid) return; b.V = ZERO; b.Vm = 0; b.f = 0; b.fm = 0; b.rocof = 0; b.live = false; b.V2 = ZERO; b.V0 = ZERO; });
+  A.buses.forEach(b => { if (b.grid) return; b.V = ZERO; b.Vm = 0; b.f = 0; b.fm = 0; b.fs = 0; b.rocof = 0; b.live = false; b.V2 = ZERO; b.V0 = ZERO; });
   A.gens.forEach(g => { g.Pe = 0; g.Qe = 0; g.I = ZERO; g.Ia = 0; });
   A.gfm.concat(A.gfl).forEach(b => { b.P = 0; b.Q = 0; b.I = ZERO; b.Ia = 0; });
   A.brs.forEach(br => { br.I = 0; br.Sa = ZERO; br.Sb = ZERO; br.load = 0; br.Iph = ZERO; });
@@ -797,7 +843,8 @@ function feederFast() {
     const b = F.bus;
     if (!isClosed(F.brk) || !b.live) { if (F.Iamp !== 0 || F.P !== 0) { F.I1 = ZERO; F.I2 = ZERO; F.I0 = ZERO; F.Iph = [0, 0, 0]; F.Iamp = 0; F.P = 0; F.Q = 0; } else F.I0 = ZERO; continue; }
     const u = b.Vm / (F.Vr || 1), fr = 1 + 1.6 * ((b.fm || 50) - 50) / 50;
-    const Sr = F.Sl.r * Math.pow(u, 1.2) * fr - F.Ppv, Si = F.Sl.i * u * u;
+    /* FV a potenza costante ma con corrente limitata a 1,1 In: a tensione bassa la potenza cala */
+    const Sr = F.Sl.r * Math.pow(u, 1.2) * fr - F.Ppv * Math.min(1, 1.1 * b.Vm), Si = F.Sl.i * u * u;
     const vr = b.V.r, vi = b.V.i, vd = vr * vr + vi * vi || 1e-30;
     /* I1 = conj(S / V) */
     let i1r = 0, i1i = 0, i2r = 0, i2i = 0;
@@ -830,14 +877,14 @@ function slowStep(dt) {
 }
 /* gruppi FV: protezione di interfaccia (SPI), LFSM-O e riconnessione */
 function pvGroupsStep(I, dt) {
-  const bus = I.buses[0], f = bus.fm, v = bus.Vm, live = bus.live;
+  const bus = I.buses[0], f = bus.fs || bus.fm, v = bus.Vm, live = bus.live;
   I.pv.groups.forEach(g => {
     if (I.pv.opOff) { if (g.on) { g.on = false; g.ramp = 0; g.why = 'comando operatore'; } g.rcT = 0; return; }
     if (g.on) {
       let why = '';
       if (!live) why = 'mancanza tensione';
-      else if (f > g.fmax) why = 'f > ' + g.fmax + ' Hz';
-      else if (f < g.fmin) why = 'f < ' + g.fmin + ' Hz';
+      else if (v > 0.5 && f > g.fmax) why = 'f > ' + g.fmax + ' Hz';
+      else if (v > 0.5 && f < g.fmin) why = 'f < ' + g.fmin + ' Hz';
       else if (v < g.vmin) why = 'V < ' + g.vmin + ' pu';
       else if (v > g.vmax) why = 'V > ' + g.vmax + ' pu';
       if (why) { g.tripT += dt; if (g.tripT >= (why.startsWith('V') ? g.tv : g.tf) || !live) { g.on = false; g.ramp = 0; g.rcT = 0; g.why = why; if (I.pv.Pav > 0.002 && !S.settling) soe(I.id, 'SPI FV ' + I.nm + ': distacco ' + g.nm + ' (' + why + ')', 2, I); } }

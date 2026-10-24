@@ -134,8 +134,9 @@ function settings() {
 }
 ACT.setTime = () => {
   const t = $('stTime').value.split(':'), d = new Date($('stDate').value);
-  S.clk = (+t[0]) * 3600 + (+t[1]) * 60;
-  if (!isNaN(d)) { const start = new Date(d.getFullYear(), 0, 0); S.doy = Math.round((d - start) / 86400000); }
+  let doy = S.doy;
+  if (!isNaN(d)) { const start = new Date(d.getFullYear(), 0, 0); doy = Math.round((d - start) / 86400000); }
+  retime((+t[0]) * 3600 + (+t[1]) * 60, doy);
   soe(null, 'Orologio impostato: ' + clkStr(S.clk) + ' del ' + dateStr(S.doy), 1);
   closeModal();
 };

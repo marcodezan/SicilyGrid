@@ -184,7 +184,7 @@ const GOALS = {
   'lip-trip': ['Riporta Lipari al criterio N-1 con tutte le utenze alimentate', () => allLive('LIP') && allLive('VUL') && S.islById.LIP.area.n1ok === true],
   'vul-cab': ['Rialimenta tutta Vulcano', () => allLive('VUL')],
   'diss': ['Porta il dissalatore in marcia', () => S.byId['LIP.L5.1'].motor.st === 'MARCIA'],
-  'legacy': ['Richiudi Lipari Centro e riporta in servizio tutto il FV', () => allLive('LIP') && S.islById.LIP.pv.groups.every(g => g.on && g.ramp >= 1)],
+  'legacy': ['Richiudi la linea del dissalatore e riporta in servizio tutto il FV', () => allLive('LIP') && S.islById.LIP.pv.groups.every(g => g.on && g.ramp >= 1)],
   'hunt': ['Elimina l\'oscillazione mantenendo Salina alimentata', () => allLive('SAL') && !(S.byId['SAL.G1'].fault.govHunt && S.byId['SAL.G1'].st === 'IN PARALLELO')],
   'lof': ['Panarea tutta alimentata dopo la perdita del gruppo', () => allLive('PAN')],
   'pan-bus': ['Rimetti in tensione Panarea e rialimenta tutte le cabine', () => allLive('PAN')],
