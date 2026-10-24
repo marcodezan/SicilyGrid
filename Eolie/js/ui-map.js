@@ -209,7 +209,7 @@ function mapOverlay(g, X, Y, v) {
   MAP.upos = {};
   const det = v.z > 30, t = SLD.t;
   /* flussi di potenza animati */
-  if (MAP.lay.flow) {
+  if (MAP.lay.flow && !UI.lowGfx) {
     g.save(); g.lineWidth = Math.max(1.5, Math.min(3, v.z / 30)); g.setLineDash([3, 11]); g.lineCap = 'round';
     S.isl.forEach(I => { if (!I.com) return; const pp = projLL(I.plant); I.feeders.forEach(F => { let prev = [X(pp[0]), Y(pp[1])]; F.nodes.forEach((N, k) => { const q = projLL(N.ll), Q = [X(q[0]), Y(q[1])], sg = F.segs[k]; if (sg.I > 0.5 && N.live) { const sp = 18 + Math.min(60, sg.I / 3); g.lineDashOffset = -t * sp; g.strokeStyle = 'rgba(220,245,255,.75)'; const fwd = N.via === sg; g.beginPath(); if (fwd) { g.moveTo(prev[0], prev[1]); g.lineTo(Q[0], Q[1]); } else { g.moveTo(Q[0], Q[1]); g.lineTo(prev[0], prev[1]); } g.stroke(); } prev = Q; }); }); });
     S.br.forEach(br => { if (br.kind === 'cpl' || !brClosed(br) || Math.abs(br.Sa.r) < 0.005) return; const a = br.a.grid ? projLL(br.a.ll) : projLL(S.islById[br.a.isl].plant), b = projLL(S.islById[br.b.isl].plant); const off = br.id === 'CV2' ? 0.15 : 0; g.lineDashOffset = -t * (20 + Math.abs(br.Sa.r) * 20); g.strokeStyle = 'rgba(255,240,170,.85)'; g.beginPath(); if (br.Sa.r > 0) { g.moveTo(X(a[0] + off), Y(a[1])); g.lineTo(X(b[0] + off), Y(b[1])); } else { g.moveTo(X(b[0] + off), Y(b[1])); g.lineTo(X(a[0] + off), Y(a[1])); } g.stroke(); });
@@ -245,7 +245,7 @@ function mapOverlay(g, X, Y, v) {
   S.faults.forEach(f => { const p = elPos(f.el); if (p) bolt(g, X(p[0]) + 10, Y(p[1]) - 8, 0.9); });
   (S.crews || []).forEach(c => { const p = elPos(c.el); if (p) wrench(g, X(p[0]) - 14, Y(p[1]) - 6, c.t); });
   /* nuvole e loro ombre */
-  if (MAP.lay.clouds) drawClouds(g, X, Y, v);
+  if (MAP.lay.clouds && !UI.lowGfx) drawClouds(g, X, Y, v);
   /* selezione e passaggio del mouse */
   const ring = (el, col, w) => { if (!el || el.el === 'isl') return; const up = MAP.upos[el.id]; let sx, sy, r;
     if (up) { sx = up[0]; sy = up[1]; r = 9 + Math.sin(t * 5); } else { const p = elPos(el); if (!p) return; sx = X(p[0]); sy = Y(p[1]); r = 13 + 2 * Math.sin(t * 5); }

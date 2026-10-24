@@ -134,6 +134,7 @@ function settings() {
     </div><div>
     ${SEC('Imprevisti casuali', PSET(PSEL('S.set|randF', 'Frequenza guasti casuali', [[0, 'nessuno'], [1, 'rari'], [2, 'frequenti'], [3, 'molto frequenti']]), PIN('S.set|repT', 'Durata interventi squadra', 's', 5), PCK('S.set|prot', 'Protezioni elettriche attive')))}
     ${SEC('Rete delle isole', PSET(`<label>Configurazione</label><span><select id="stNet"><option value="rinnovabile" ${NET_CFG.net === 'rinnovabile' ? 'selected' : ''}>Rinnovabile (FV che copre il picco, accumulo su ogni isola)</option><option value="storico" ${NET_CFG.net === 'storico' ? 'selected' : ''}>Storica (poco FV, pochi accumuli)</option></select></span>`) + ROW('<button class="btn" data-a="setNet">Applica e riavvia</button>') + '<p class="note">Nella rete rinnovabile il FV di ogni isola, a mezzogiorno con cielo sereno, copre il picco di domanda della giornata; gli accumuli spostano il surplus verso la sera.</p>')}
+    ${SEC('Prestazioni', KV('<span>Fotogrammi al secondo</span><b>' + PERF.fps.toFixed(0) + '</b>', '<span>Simulazione per fotogramma</span><b>' + simLoad.toFixed(1) + ' ms</b>', '<span>Lavoro totale per fotogramma</span><b>' + frameCost.toFixed(1) + ' ms</b>') + ROW(`<button class="btn ${UI.lowGfx ? 'on' : ''}" data-a="gfx">${UI.lowGfx ? 'Grafica ridotta: ATTIVA' : 'Attiva la grafica ridotta'}</button>`) + '<p class="note">La grafica ridotta toglie nuvole e flussi animati dalla mappa e ridisegna schema e mappa meno spesso: la simulazione elettrica resta identica. Si attiva da sola se per 15 secondi si scende sotto 24 fotogrammi al secondo.</p>')}
     ${SEC('Simulazione', ROW('<button class="btn dg" data-a="restart">Riavvia da capo</button>') + '<p class="note">Il riavvio ricostruisce rete e stato iniziale (ore 11:30 del 10 agosto)' + (ECO.on ? ' e fa ripartire da zero la partita di gestione' : '') + '.</p>')}
     </div></div>`);
   document.querySelectorAll('#mBody input[data-pk], #mBody select[data-pk]').forEach(n => { const v = getPK(n.dataset.pk); if (n.type === 'checkbox') n.checked = !!v; else n.value = v; });
@@ -179,6 +180,23 @@ function help() {
 }
 
 /* ---------- ciclo principale ---------- */
+/* prestazioni: fotogrammi al secondo e carico; grafica ridotta automatica se il computer fatica */
+UI.lowGfx = false; try { UI.lowGfx = localStorage.getItem('eolie.gfx') === 'low'; } catch (e) { }
+const PERF = { n: 0, t0: performance.now(), fps: 60, low: 0, auto: false };
+function perfTrack() {
+  PERF.n++;
+  const now = performance.now(), el = (now - PERF.t0) / 1000;
+  if (el < 5) return;
+  PERF.fps = PERF.n / el; PERF.n = 0; PERF.t0 = now;
+  if (document.hidden) return;
+  PERF.low = PERF.fps < 24 ? PERF.low + 1 : 0;
+  if (PERF.low >= 3 && !UI.lowGfx && !PERF.auto) {
+    PERF.auto = true; setGfx(true);
+    toast('Il computer fatica a tenere il passo: attivata la grafica ridotta (meno animazioni sulla mappa, ridisegno più rado). Si disattiva da Impostazioni.', true);
+  }
+}
+function setGfx(low) { UI.lowGfx = low; try { localStorage.setItem('eolie.gfx', low ? 'low' : 'high'); } catch (e) { } }
+ACT.gfx = () => { setGfx(!UI.lowGfx); PERF.auto = true; settings(); };
 let last = performance.now(), acc = 0, tDom = 0, tCv = 0, tMini = 0, tScope = 0, simLoad = 0, domPhase = 0, frameCost = 8;
 /* ciclo principale: la dinamica elettrica ha la priorità; il disegno si adatta al carico della macchina
    e i lavori pesanti (canvas, DOM) non si sommano nello stesso fotogramma */
@@ -195,7 +213,8 @@ function frame(now) {
   SLD.t += dtr;
   tCv += dtr; tDom += dtr; tMini += dtr; tScope += dtr;
   /* fotogrammi del disegno: 30/s se la macchina è scarica, fino a 12/s se è sovraccarica */
-  const cvInt = frameCost > 30 ? 1 / 12 : frameCost > 18 ? 1 / 20 : 1 / 30;
+  const cvInt = UI.lowGfx ? (frameCost > 30 ? 1 / 8 : 1 / 12) : frameCost > 30 ? 1 / 12 : frameCost > 18 ? 1 / 20 : 1 / 30;
+  perfTrack(dtr);
   const L = UI.lay || {};
   let heavy = false;
   if (tCv > cvInt) { tCv = 0; if (UI.ctab === 'sld') { sldDraw(); heavy = true; } else if (UI.ctab === 'map') { mapDraw(); heavy = true; } }
