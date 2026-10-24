@@ -23,27 +23,38 @@ function mapDraw() {
   if (!UI.view[key]) mapFit(UI.isl);
   mapAnimStep(key);
   const v = UI.view[key], X = x => x * v.z + v.ox, Y = y => y * v.z + v.oy;
+  /* sfondo statico (mare, griglia, terraferma, isole) in cache: si ridisegna solo se cambia la vista */
+  const bgKey = v.z.toFixed(4) + ',' + v.ox.toFixed(1) + ',' + v.oy.toFixed(1) + ',' + SLD.w + ',' + SLD.h + ',' + SLD.dpr + ',' + UI.isl;
+  if (!MAP.bg || MAP.bgKey !== bgKey) {
+    const bc = MAP.bg || (MAP.bg = document.createElement('canvas'));
+    if (bc.width !== SLD.cv.width || bc.height !== SLD.cv.height) { bc.width = SLD.cv.width; bc.height = SLD.cv.height; }
+    const b = bc.getContext('2d');
+    b.setTransform(SLD.dpr, 0, 0, SLD.dpr, 0, 0);
+    const sea = b.createLinearGradient(0, 0, 0, SLD.h); sea.addColorStop(0, '#061722'); sea.addColorStop(1, '#04101a');
+    b.fillStyle = sea; b.fillRect(0, 0, SLD.w, SLD.h);
+    /* griglia 1 km / 5 km */
+    const step = v.z > 60 ? 1 : 5;
+    b.strokeStyle = 'rgba(54,185,255,.05)'; b.lineWidth = 1; b.beginPath();
+    for (let x = Math.floor(-v.ox / v.z / step) * step; X(x) < SLD.w; x += step) { b.moveTo(X(x), 0); b.lineTo(X(x), SLD.h); }
+    for (let y = Math.floor(-v.oy / v.z / step) * step; Y(y) < SLD.h; y += step) { b.moveTo(0, Y(y)); b.lineTo(SLD.w, Y(y)); }
+    b.stroke();
+    /* terraferma (Sicilia, Calabria) */
+    GEO.land.forEach(r => { b.beginPath(); polyPath(b, r, X, Y, 0, 0); b.fillStyle = '#0f1d1f'; b.fill(); b.strokeStyle = '#25424a'; b.lineWidth = 1; b.stroke(); });
+    GEO.places.forEach(p => { txt(b, p[0], X(p[1]) + 5, Y(p[2]) + 3, '#3d6570', '10px ' + FONTS); b.fillStyle = '#3d6570'; b.fillRect(X(p[1]) - 2, Y(p[2]) - 2, 4, 4); });
+    Object.keys(GEO.isl).forEach(gid => {
+      const G = GEO.isl[gid], I = S.islById[gid];
+      b.beginPath(); G.polys.forEach(r => polyPath(b, r, X, Y, G.c[0], G.c[1]));
+      b.fillStyle = '#132a28'; b.fill();
+      b.strokeStyle = I && UI.isl === gid ? '#7fd1c8' : '#36706b'; b.lineWidth = I && UI.isl === gid ? 2 : 1.2; b.stroke();
+      if (v.z < 25) txt(b, I ? I.nm.toUpperCase() : gid, X(G.c[0]), Y(G.c[1] + G.bb[1]) - 6, '#8fb6c4', '600 11px ' + FONTS, 'center');
+    });
+    MAP.bgKey = bgKey;
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(MAP.bg, 0, 0);
   g.setTransform(SLD.dpr, 0, 0, SLD.dpr, 0, 0);
-  const sea = g.createLinearGradient(0, 0, 0, SLD.h); sea.addColorStop(0, '#061722'); sea.addColorStop(1, '#04101a');
-  g.fillStyle = sea; g.fillRect(0, 0, SLD.w, SLD.h);
-  /* griglia 1 km / 5 km */
-  const step = v.z > 60 ? 1 : 5;
-  g.strokeStyle = 'rgba(54,185,255,.05)'; g.lineWidth = 1; g.beginPath();
-  for (let x = Math.floor(-v.ox / v.z / step) * step; X(x) < SLD.w; x += step) { g.moveTo(X(x), 0); g.lineTo(X(x), SLD.h); }
-  for (let y = Math.floor(-v.oy / v.z / step) * step; Y(y) < SLD.h; y += step) { g.moveTo(0, Y(y)); g.lineTo(SLD.w, Y(y)); }
-  g.stroke();
-  /* terraferma (Sicilia, Calabria) */
-  GEO.land.forEach(r => { g.beginPath(); polyPath(g, r, X, Y, 0, 0); g.fillStyle = '#0f1d1f'; g.fill(); g.strokeStyle = '#25424a'; g.lineWidth = 1; g.stroke(); });
-  GEO.places.forEach(p => { txt(g, p[0], X(p[1]) + 5, Y(p[2]) + 3, '#3d6570', '10px ' + FONTS); g.fillStyle = '#3d6570'; g.fillRect(X(p[1]) - 2, Y(p[2]) - 2, 4, 4); });
   MAP.hits = []; MAP.lbl = [];
-  /* isole */
   Object.keys(GEO.isl).forEach(gid => {
-    const G = GEO.isl[gid];
-    const I = S.islById[gid];
-    g.beginPath(); G.polys.forEach(r => polyPath(g, r, X, Y, G.c[0], G.c[1]));
-    g.fillStyle = '#132a28'; g.fill();
-    g.strokeStyle = I && UI.isl === gid ? '#7fd1c8' : '#36706b'; g.lineWidth = I && UI.isl === gid ? 2 : 1.2; g.stroke();
-    if (v.z < 25) txt(g, I ? I.nm.toUpperCase() : gid, X(G.c[0]), Y(G.c[1] + G.bb[1]) - 6, '#8fb6c4', '600 11px ' + FONTS, 'center');
+    const G = GEO.isl[gid], I = S.islById[gid];
     if (I) MAP.hits.push({ isl: gid, el: I, x: X(G.c[0] + G.bb[0]), y: Y(G.c[1] + G.bb[1]), w: (G.bb[2] - G.bb[0]) * v.z, h: (G.bb[3] - G.bb[1]) * v.z, area: true });
   });
   const det = v.z > 30;
@@ -76,10 +87,10 @@ function mapDraw() {
         MAP.hits.push({ el: sg, x: (prev[0] + Q[0]) / 2 - 6, y: (prev[1] + Q[1]) / 2 - 6, w: 12, h: 12 });
         if (v.z > 260 && MAP.lay.lab && I.com) { const mx = (prev[0] + Q[0]) / 2, my = (prev[1] + Q[1]) / 2; txt(g, sg.km.toFixed(1) + ' km · ' + (sg.I > 0.5 ? fI(sg.I) : 'fuori tensione'), mx + 8, my + 4, sg.I > 0.5 ? '#8fb6c4' : COL.dim, '9px ' + FONTM); if (sg.sw) txt(g, 'IMS ' + (sg.sw.closed ? 'chiuso' : 'APERTO'), prev[0] + (Q[0] - prev[0]) * 0.15 + 8, prev[1] + (Q[1] - prev[1]) * 0.15 - 6, sg.sw.closed ? COL.dim : COL.wa, '9px ' + FONTM); }
         const c = !N.live ? COL.dead : N.Vm < 0.92 ? COL.wa : COL.mv;
-        if (N.live && det && MAP.lay.load) { const r = 8 + Math.sqrt(N.Pl * 1000) * 0.6; const gr = g.createRadialGradient(Q[0], Q[1], 0, Q[0], Q[1], r); gr.addColorStop(0, 'rgba(255,215,120,.25)'); gr.addColorStop(1, 'rgba(255,215,120,0)'); g.fillStyle = gr; g.beginPath(); g.arc(Q[0], Q[1], r, 0, 7); g.fill(); }
+        if (N.live && det && MAP.lay.load) { const r = 8 + Math.sqrt(N.Pl * 1000) * 0.6; g.drawImage(glowSprite('load'), Q[0] - r, Q[1] - r, 2 * r, 2 * r); }
         if (N.pv > 0 && det && MAP.lay.pv) {
           const sc = clamp(v.z / 60, 0.7, 2.2), pw = 15 * sc, ph = 10 * sc, px = Q[0] - pw - 8, py = Q[1] - ph / 2, on = N.Ppv > 0.0005;
-          if (on) { const r = 6 + Math.sqrt(N.Ppv * 1000) * 1.2 * sc / 1.5; const gr = g.createRadialGradient(px + pw / 2, Q[1], 0, px + pw / 2, Q[1], r); gr.addColorStop(0, 'rgba(255,210,61,.35)'); gr.addColorStop(1, 'rgba(255,210,61,0)'); g.fillStyle = gr; g.beginPath(); g.arc(px + pw / 2, Q[1], r, 0, 7); g.fill(); }
+          if (on) { const r = 6 + Math.sqrt(N.Ppv * 1000) * 1.2 * sc / 1.5; g.drawImage(glowSprite('pv'), px + pw / 2 - r, Q[1] - r, 2 * r, 2 * r); }
           pvGlyph(g, px, py, pw, ph, N.pvOff ? COL.dim : on ? '#ffd23d' : '#6b6230');
           if (v.z > 110) txt(g, N.pvOff ? 'off' : (N.Ppv * 1000).toFixed(0) + ' kW', px + pw / 2, py + ph + 10, N.pvOff ? COL.dim : '#ffd23d', '9px ' + FONTM, 'center');
           MAP.hits.push({ el: N, x: px - 2, y: py - 2, w: pw + 4, h: ph + 4 });
@@ -242,6 +253,31 @@ function mapOverlay(g, X, Y, v) {
   if (UI.sel) ring(UI.sel, '#ffffff', 2);
   if (UI.hov && UI.hov !== UI.sel) ring(UI.hov, 'rgba(255,255,255,.45)', 1.5);
 }
+/* sprite pre-renderizzati (gradienti radiali costosi da ricreare a ogni fotogramma) */
+const GLOW = {};
+function glowSprite(kind) {
+  if (GLOW[kind]) return GLOW[kind];
+  const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+  const col = kind === 'pv' ? '255,210,61' : '255,215,120', a0 = kind === 'pv' ? 0.35 : 0.25;
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(' + col + ',' + a0 + ')'); gr.addColorStop(1, 'rgba(' + col + ',0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return (GLOW[kind] = c);
+}
+const CLOUD_R = 60, CLOUD_C = 110;
+function cloudSprite(c) {
+  if (c.spr && c.sprD === c.d) return c.spr;
+  const cv = c.spr || document.createElement('canvas'); cv.width = cv.height = 2 * CLOUD_C; const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  const R = CLOUD_R, k = 0.22 + 0.33 * c.d, shade = Math.round(255 - 110 * c.d);
+  c.puffs.forEach(p => {
+    const px = CLOUD_C + p[0] * R, py = CLOUD_C + p[1] * R, pr = p[2] * R;
+    const gr = g.createRadialGradient(px, py - pr * 0.2, pr * 0.1, px, py, pr);
+    gr.addColorStop(0, `rgba(${shade},${shade},${shade + 8},${k})`); gr.addColorStop(1, `rgba(${shade},${shade},${shade + 8},0)`);
+    g.fillStyle = gr; g.beginPath(); g.arc(px, py, pr, 0, 7); g.fill();
+  });
+  c.spr = cv; c.sprD = c.d;
+  return cv;
+}
 const WDIR = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
 function windName() { return WDIR[Math.round(((S.set.windFrom % 360) + 360) % 360 / 45) % 8]; }
 function drawClouds(g, X, Y, v) {
@@ -252,15 +288,9 @@ function drawClouds(g, X, Y, v) {
     /* ombra a terra */
     g.save(); g.globalAlpha = 0.28 * c.d * a; g.fillStyle = '#000';
     g.beginPath(); g.ellipse(X(c.x), Y(c.y), R * 0.95, R * 0.72, 0, 0, 7); g.fill(); g.restore();
-    /* nube (leggermente spostata: è in quota) */
-    const ox = X(c.x) - R * 0.12, oy = Y(c.y) - R * 0.25;
-    c.puffs.forEach(p => {
-      const px = ox + p[0] * R, py = oy + p[1] * R, pr = p[2] * R;
-      const gr = g.createRadialGradient(px, py - pr * 0.2, pr * 0.1, px, py, pr);
-      const k = (0.22 + 0.33 * c.d) * a, shade = Math.round(255 - 110 * c.d);
-      gr.addColorStop(0, `rgba(${shade},${shade},${shade + 8},${k})`); gr.addColorStop(1, `rgba(${shade},${shade},${shade + 8},0)`);
-      g.fillStyle = gr; g.beginPath(); g.arc(px, py, pr, 0, 7); g.fill();
-    });
+    /* nube (leggermente spostata: è in quota), disegnata da uno sprite pre-calcolato */
+    const ox = X(c.x) - R * 0.12, oy = Y(c.y) - R * 0.25, sp = cloudSprite(c), sc = R / CLOUD_R;
+    g.save(); g.globalAlpha = a; g.drawImage(sp, ox - CLOUD_C * sc, oy - CLOUD_C * sc, sp.width * sc, sp.height * sc); g.restore();
     if (c.user && v.z > 15) txt(g, Math.round(c.d * 100) + '%', ox, oy - R * 0.6, 'rgba(230,240,255,.8)', '10px ' + FONTM, 'center');
   });
   /* rosa del vento */

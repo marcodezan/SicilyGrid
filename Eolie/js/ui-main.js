@@ -168,28 +168,41 @@ function help() {
 }
 
 /* ---------- ciclo principale ---------- */
-let last = performance.now(), acc = 0, tDom = 0, tCv = 0, tMini = 0, tScope = 0, simLoad = 0;
+let last = performance.now(), acc = 0, tDom = 0, tCv = 0, tMini = 0, tScope = 0, simLoad = 0, domPhase = 0, frameCost = 8;
+/* ciclo principale: la dinamica elettrica ha la priorità; il disegno si adatta al carico della macchina
+   e i lavori pesanti (canvas, DOM) non si sommano nello stesso fotogramma */
 function frame(now) {
   const dtr = Math.min(0.1, (now - last) / 1000); last = now;
+  const tf0 = performance.now();
   if (!UI.paused) {
     acc += dtr * UI.slow;
     let n = Math.floor(acc / DT); acc -= n * DT;
     if (n > 110) { n = 110; acc = 0; }
-    const t0 = performance.now();
-    for (let i = 0; i < n; i++) { fastStep(DT); if ((i & 15) === 15 && performance.now() - t0 > 28) { acc = 0; break; } }
-    simLoad = simLoad * 0.95 + (performance.now() - t0) * 0.05;
+    for (let i = 0; i < n; i++) { fastStep(DT); if ((i & 15) === 15 && performance.now() - tf0 > 24) { acc = 0; break; } }
+    simLoad = simLoad * 0.95 + (performance.now() - tf0) * 0.05;
   }
   SLD.t += dtr;
   tCv += dtr; tDom += dtr; tMini += dtr; tScope += dtr;
-  if (tCv > 1 / 30) { tCv = 0; if (UI.ctab === 'sld') sldDraw(); else if (UI.ctab === 'map') mapDraw(); }
-  if (tScope > 1 / 25) { tScope = 0; if (UI.btab === 'scope') scopeDraw(); else if (UI.btab === 'trend') trendDraw(); }
-  if (tMini > 0.25) { tMini = 0; miniDraw(); }
-  if (tDom > 0.2) {
-    tDom = 0; updHeader(); refreshIslList(); updFace(); soeNotify(); gameStep(0.2); updScore();
-    if (UI.ctab === 'dash') { if (dashKey !== UI.dash) buildDash(); else updDash(); }
-    if (UI.btab === 'alm') renderAlarms(); if (UI.btab === 'soe') renderSoe();
-    if (S.rec.recs.length !== UI.nRecs) { UI.nRecs = S.rec.recs.length; if (UI.btab === 'scope' && !document.activeElement.closest('#scopeCtl')) buildScopeCtl(); }
+  /* fotogrammi del disegno: 30/s se la macchina è scarica, fino a 12/s se è sovraccarica */
+  const cvInt = frameCost > 30 ? 1 / 12 : frameCost > 18 ? 1 / 20 : 1 / 30;
+  const L = UI.lay || {};
+  let heavy = false;
+  if (tCv > cvInt) { tCv = 0; if (UI.ctab === 'sld') { sldDraw(); heavy = true; } else if (UI.ctab === 'map') { mapDraw(); heavy = true; } }
+  const botVis = L.bottom && L.max !== 'center';
+  if (tScope > cvInt * 1.2 && !heavy && botVis) { tScope = 0; if (UI.btab === 'scope') { scopeDraw(); heavy = true; } else if (UI.btab === 'trend') { trendDraw(); heavy = true; } }
+  if (tMini > 0.5 && !heavy && L.left !== false && L.max !== 'center') { tMini = 0; miniDraw(); heavy = true; }
+  /* aggiornamenti dell'interfaccia: due mezze tornate alternate ogni 0,1 s */
+  if (tDom > 0.1 && (!heavy || tDom > 0.3)) {
+    tDom = 0; domPhase ^= 1;
+    if (domPhase) { updHeader(); refreshIslList(); soeNotify(); gameStep(0.2); updScore(); if (typeof ecoTick === 'function') ecoTick(0.2); }
+    else {
+      updFace();
+      if (UI.ctab === 'dash') { if (dashKey !== UI.dash) buildDash(); else updDash(); }
+      if (botVis) { if (UI.btab === 'alm') renderAlarms(); if (UI.btab === 'soe') renderSoe(); }
+      if (S.rec.recs.length !== UI.nRecs) { UI.nRecs = S.rec.recs.length; if (UI.btab === 'scope' && !document.activeElement.closest('#scopeCtl')) buildScopeCtl(); }
+    }
   }
+  frameCost = frameCost * 0.9 + (performance.now() - tf0) * 0.1;
   requestAnimationFrame(frame);
 }
 scopePreset('bus'); buildTrendCtl(); refreshIslList(true); buildFace();

@@ -109,12 +109,14 @@ function canClose(b, by) {
   return [true, 'sincronismo'];
 }
 function brkStep(dt) {
-  S.brks.forEach(b => {
+  for (const b of S.brks) {
+    if (b.st === 'C' && b.bfT < 0) continue;
+    if (b.st === 'O' && b.bfT < 0) continue;
     if (b.st === 'OP') { b.tmr -= dt; if (b.tmr <= 0) { b.st = 'O'; b.ops++; S.topoDirty = true; S.feedDirty = true; brkChanged(b, false); } }
     else if (b.st === 'CL') {
       b.tmr -= dt;
       if (b.tmr <= 0) {
-        if (b.failClose) { b.st = 'O'; soe(b.isl, b.nm + ': MANCATA CHIUSURA (bobina/meccanismo)', 3, b.owner); alarmRaise('fc.' + b.id, 2, 'Mancata chiusura ' + b.nm, b.isl, b.owner); return; }
+        if (b.failClose) { b.st = 'O'; soe(b.isl, b.nm + ': MANCATA CHIUSURA (bobina/meccanismo)', 3, b.owner); alarmRaise('fc.' + b.id, 2, 'Mancata chiusura ' + b.nm, b.isl, b.owner); continue; }
         b.st = 'C'; b.ops++; S.topoDirty = true; S.feedDirty = true; brkChanged(b, true);
       }
     }
@@ -132,7 +134,7 @@ function brkStep(dt) {
         triggerRec(b.isl, '50BF ' + b.nm);
       }
     }
-  });
+  }
 }
 /* estrazione/inserzione del carrello dell'interruttore (solo con l'impianto fuori tensione) */
 function brkRack(b, out) {
@@ -212,16 +214,16 @@ function faultLocate(f) {
   }
 }
 function faultsEnergize() {
-  S.feeders.forEach(F => { F.I0f = null; F.I0dir = 0; });
-  S.isl.forEach(I => { I.V0 = 0; I.Ig = 0; });
-  S.faults.forEach(f => {
+  for (const F of S.feeders) { F.I0f = null; F.I0dir = 0; }
+  for (const I of S.isl) { I.V0 = 0; I.Ig = 0; }
+  for (const f of S.faults) {
     const was = f.on;
     f.on = !!(f.bus && f.bus.live && f.path.every(devClosed) && !f.gone);
     if (f.on && f.loc === 'gen' && !devClosed(f.el.brk)) f.on = false;
     if (!f.on) { f.I1 = null; f.I2 = null; f.Ifa = 0; }
     else if (f.loc === 'gen' || f.loc === 'bus' || f.loc === 'cab') { f.el._fon = S.n; }
     if (f.on !== was && !f.on) f.tOff = 0;
-  });
+  }
 }
 function faultAdm(f, A) {
   const zf = cx(f.rf / ZB, 0);
@@ -382,11 +384,12 @@ function relOperate(r, why) {
   triggerRec(isl, r.code + ' ' + nm);
 }
 const LOGPK = { '50': 1, '51': 1, '67N': 1, '51N': 1, '87G': 1, '87L': 1, '87B': 1 };
+/* avviamento / scatto a tempo definito. why(r) è una funzione statica: nessuna closure per passo */
 function relPick(r, cond, t, why, dt) {
   if (cond) {
-    if (!r.pk) { r.pk = true; r.tAcc = 0; if (LOGPK[r.code]) soe(r.el.isl || (r.el.a && (r.el.b.isl || r.el.a.isl)), 'Avviamento ' + r.code + ' ' + r.el.nm + ' (' + why() + ')', 2, r.el); }
+    if (!r.pk) { r.pk = true; r.tAcc = 0; if (LOGPK[r.code]) soe(r.el.isl || (r.el.a && (r.el.b.isl || r.el.a.isl)), 'Avviamento ' + r.code + ' ' + r.el.nm + ' (' + why(r) + ')', 2, r.el); }
     r.tAcc += dt;
-    if (r.tAcc >= t && !r.op) relOperate(r, why());
+    if (r.tAcc >= t && !r.op) relOperate(r, why(r));
   } else if (r.pk || r.op) { r.pk = false; r.tAcc = 0; r.op = false; }
 }
 function idmt(r, I, dt) {
@@ -397,91 +400,121 @@ function idmt(r, I, dt) {
     if (!r.pk) { r.pk = true; r.acc = 0; }
     r.acc += dt / Math.max(top, 0.02);
     if (r.acc >= 1 && !r.op) relOperate(r, 'I=' + Math.round(I) + ' A');
-  } else { if (r.pk) { r.pk = false; r.op = false; } r.acc = Math.max(0, r.acc - dt * 2); }
+  } else { if (r.pk) { r.pk = false; r.op = false; } if (r.acc > 0) r.acc = Math.max(0, r.acc - dt * 2); }
 }
+const fI0 = F => F.I0f ? cabs(F.I0f) * 3 * IB : 0;
+const WHY = {
+  f50: r => 'I=' + Math.round(r.el.Iamp) + ' A',
+  f67N: r => '3I0=' + fI0(r.el).toFixed(1) + ' A, V0=' + (S.islById[r.el.isl].V0 * 100).toFixed(0) + '%',
+  f51N: r => '3I0=' + fI0(r.el).toFixed(1) + ' A',
+  f27: r => 'V=' + r.el.bus.Vm.toFixed(2) + ' pu',
+  f81U: r => { const e = r.el, U = S.islById[e.isl].ufls, st = U.stages[e.ufls - 1]; return r._rc ? 'df/dt=' + e.bus.rocof.toFixed(2) + ' Hz/s' : 'f=' + e.bus.fm.toFixed(2) + ' Hz < ' + st.f; },
+  g87G: () => 'guasto interno',
+  g51V: r => 'I=' + Math.round(r.el.Ia) + ' A, V=' + r.el.bus.Vm.toFixed(2),
+  g32: r => 'P=' + (r.el.Pe * 1000).toFixed(0) + ' kW',
+  g40: r => 'Q=' + (r.el.Qe * 1000).toFixed(0) + ' kvar',
+  g46: r => 'I2=' + Math.round(r.el.I2a || 0) + ' A',
+  g78: r => 'angolo rotore ' + (Math.abs(wrapPi(r.el.d - r.el.bus.th)) * 180 / Math.PI).toFixed(0) + '°',
+  gf: r => 'f=' + r.el.bus.fm.toFixed(2) + ' Hz',
+  g59: r => 'V=' + r.el.bus.Vm.toFixed(3) + ' pu',
+  g27: r => 'V=' + r.el.bus.Vm.toFixed(2) + ' pu',
+  g12: r => 'n=' + Math.round(r.el.w * r.el.rpm) + ' giri/min',
+  g26: r => 'T acqua ' + r.el.Tc.toFixed(0) + ' °C',
+  g63: r => 'p olio ' + r.el.oil.toFixed(1) + ' bar',
+  spi: r => r._why + ' (f=' + r.el.bus.fm.toFixed(2) + ' Hz, V=' + r.el.bus.Vm.toFixed(2) + ')',
+  bms: r => { const B = r.el; return B.Tcell > r.set.T ? 'temperatura celle ' + B.Tcell.toFixed(0) + ' °C' : B.ovT > 1.5 ? 'sovraccarico convertitore' : B.fault.trip ? 'allarme BMS' : 'SoC esaurito'; },
+  b87B: () => 'guasto in zona sbarra',
+  l87L: () => 'corrente differenziale',
+  l49: r => 'sovraccarico termico ' + Math.round(Math.sqrt(r.el.th) * 100) + '%'
+};
 function protStep(dt) {
   if (S.settling || !S.set.prot) return;
-  S.relays.forEach(r => {
-    if (!r.en) { r.pk = false; return; }
-    const e = r.el, p = r.set;
+  const R = S.relays;
+  for (let i = 0; i < R.length; i++) {
+    const r = R[i];
+    if (!r.en) { r.pk = false; continue; }
+    const e = r.el, p = r.set, c = r.code;
     switch (e.el) {
       case 'fdr': {
-        const live = devClosed(e.brk) && e.bus.live, I = e.Iamp, I0 = e.I0f ? cabs(e.I0f) * 3 * IB : 0;
-        const Isl = S.islById[e.isl];
-        if (r.code === '50') relPick(r, live && I > p.Is, p.t, () => ('I=' + Math.round(I) + ' A'), dt);
-        else if (r.code === '51') { if (live) idmt(r, S.t - (e.brk.tCl || -99) < 60 ? I / 2 : I, dt); else { r.pk = false; r.acc = 0; r.op = false; } }
-        else if (r.code === '67N') relPick(r, live && I0 > p.Is && Isl.V0 > p.V0 && e.I0dir > 0, p.t, () => ('3I0=' + I0.toFixed(1) + ' A, V0=' + (Isl.V0 * 100).toFixed(0) + '%'), dt);
-        else if (r.code === '51N') relPick(r, live && I0 > p.Is, p.t, () => ('3I0=' + I0.toFixed(1) + ' A'), dt);
-        else if (r.code === '27') relPick(r, devClosed(e.brk) && e.bus.Vm < p.V, p.t, () => ('V=' + e.bus.Vm.toFixed(2) + ' pu'), dt);
-        else if (r.code === '81U') {
-          const U = Isl.ufls; if (!U.en || !e.ufls) { r.pk = false; break; }
+        const live = devClosed(e.brk) && e.bus.live;
+        if (c === '50') relPick(r, live && e.Iamp > p.Is, p.t, WHY.f50, dt);
+        else if (c === '51') { if (live) idmt(r, S.t - (e.brk.tCl || -99) < 60 ? e.Iamp / 2 : e.Iamp, dt); else if (r.pk || r.op || r.acc) { r.pk = false; r.acc = 0; r.op = false; } }
+        else if (c === '67N') relPick(r, live && e.I0f !== null && e.I0dir > 0 && fI0(e) > p.Is && S.islById[e.isl].V0 > p.V0, p.t, WHY.f67N, dt);
+        else if (c === '51N') relPick(r, live && e.I0f !== null && fI0(e) > p.Is, p.t, WHY.f51N, dt);
+        else if (c === '27') relPick(r, devClosed(e.brk) && e.bus.Vm < p.V, p.t, WHY.f27, dt);
+        else if (c === '81U') {
+          const U = S.islById[e.isl].ufls; if (!U.en || !e.ufls) { r.pk = false; break; }
           const st = U.stages[e.ufls - 1]; if (!st) break;
           const rc = U.rocof.en && e.ufls <= 2 && e.bus.rocof < U.rocof.df;
-          relPick(r, live && e.bus.Vm > 0.5 && (e.bus.fm < st.f || rc), rc ? U.rocof.t : st.t, () => (rc ? 'df/dt=' + e.bus.rocof.toFixed(2) + ' Hz/s' : 'f=' + e.bus.fm.toFixed(2) + ' Hz < ' + st.f), dt);
+          r._rc = rc;
+          relPick(r, live && e.bus.Vm > 0.5 && (e.bus.fm < st.f || rc), rc ? U.rocof.t : st.t, WHY.f81U, dt);
         }
         break;
       }
       case 'gen': {
-        const G = e, on = devClosed(G.brk) && G.bus.live;
-        if (r.code === '87G') relPick(r, G._fon === S.n, p.t, () => ('guasto interno'), dt);
-        else if (r.code === '51V') { const V = G.bus.Vm, k = V < 0.8 ? Math.max(0.25, V / 0.8) : 1; relPick(r, on && G.Ia > p.k * G.In * k, p.t, () => ('I=' + Math.round(G.Ia) + ' A, V=' + V.toFixed(2)), dt); }
-        else if (r.code === '32') relPick(r, on && G.Pe < -p.P * G.Pn, p.t, () => ('P=' + (G.Pe * 1000).toFixed(0) + ' kW'), dt);
-        else if (r.code === '40') relPick(r, on && G.Qe < -p.Q * G.Sn, p.t, () => ('Q=' + (G.Qe * 1000).toFixed(0) + ' kvar'), dt);
-        else if (r.code === '46') { const I2 = G.I2a || 0; relPick(r, on && I2 > p.I2 * G.In, p.t, () => ('I2=' + Math.round(I2) + ' A'), dt); }
-        else if (r.code === '78') { const a = Math.abs(wrapPi(G.d - G.bus.th)) * 180 / Math.PI; relPick(r, on && a > p.ang, 0, () => ('angolo rotore ' + a.toFixed(0) + '°'), dt); }
-        else if (r.code === '81O') relPick(r, on && G.bus.Vm > 0.3 && G.bus.fm > p.f, p.t, () => ('f=' + G.bus.fm.toFixed(2) + ' Hz'), dt);
-        else if (r.code === '81U') relPick(r, on && G.bus.Vm > 0.3 && G.bus.fm < p.f && G.bus.fm > 10, p.t, () => ('f=' + G.bus.fm.toFixed(2) + ' Hz'), dt);
-        else if (r.code === '59') relPick(r, on && G.bus.Vm > p.V, p.t, () => ('V=' + G.bus.Vm.toFixed(3) + ' pu'), dt);
-        else if (r.code === '27') relPick(r, devClosed(G.brk) && G.bus.Vm < p.V, p.t, () => ('V=' + G.bus.Vm.toFixed(2) + ' pu'), dt);
-        else if (r.code === '12') relPick(r, genRunning(G) && G.w > p.w, 0.02, () => ('n=' + Math.round(G.w * G.rpm) + ' giri/min'), dt);
-        else if (r.code === '26') relPick(r, genRunning(G) && G.Tc > p.T, 0.5, () => ('T acqua ' + G.Tc.toFixed(0) + ' °C'), dt);
-        else if (r.code === '63') relPick(r, genRunning(G) && G.st !== 'ACCELERAZIONE' && G.oil < p.p, p.t, () => ('p olio ' + G.oil.toFixed(1) + ' bar'), dt);
+        const G = e, cl = devClosed(G.brk), on = cl && G.bus.live, run = genRunning(G);
+        /* gruppo fermo e separato: nessuna condizione può essere vera */
+        if (!cl && !run && !r.pk && !r.op && G._fon !== S.n) break;
+        if (c === '87G') relPick(r, G._fon === S.n, p.t, WHY.g87G, dt);
+        else if (c === '51V') { const V = G.bus.Vm, kk = V < 0.8 ? Math.max(0.25, V / 0.8) : 1; relPick(r, on && G.Ia > p.k * G.In * kk, p.t, WHY.g51V, dt); }
+        else if (c === '32') relPick(r, on && G.Pe < -p.P * G.Pn, p.t, WHY.g32, dt);
+        else if (c === '40') relPick(r, on && G.Qe < -p.Q * G.Sn, p.t, WHY.g40, dt);
+        else if (c === '46') relPick(r, on && (G.I2a || 0) > p.I2 * G.In, p.t, WHY.g46, dt);
+        else if (c === '78') relPick(r, on && Math.abs(wrapPi(G.d - G.bus.th)) * 180 / Math.PI > p.ang, 0, WHY.g78, dt);
+        else if (c === '81O') relPick(r, on && G.bus.Vm > 0.3 && G.bus.fm > p.f, p.t, WHY.gf, dt);
+        else if (c === '81U') relPick(r, on && G.bus.Vm > 0.3 && G.bus.fm < p.f && G.bus.fm > 10, p.t, WHY.gf, dt);
+        else if (c === '59') relPick(r, on && G.bus.Vm > p.V, p.t, WHY.g59, dt);
+        else if (c === '27') relPick(r, cl && G.bus.Vm < p.V, p.t, WHY.g27, dt);
+        else if (c === '12') relPick(r, run && G.w > p.w, 0.02, WHY.g12, dt);
+        else if (c === '26') relPick(r, run && G.Tc > p.T, 0.5, WHY.g26, dt);
+        else if (c === '63') relPick(r, run && G.st !== 'ACCELERAZIONE' && G.oil < p.p, p.t, WHY.g63, dt);
         break;
       }
       case 'bess': {
         const B = e, on = devClosed(B.brk);
-        if (r.code === 'SPI') {
+        if (c === 'SPI') {
           const f = B.bus.fm, v = B.bus.Vm;
           const why = !B.bus.live ? 'mancanza tensione' : f > p.fmax ? 'f>' + p.fmax : f < p.fmin ? 'f<' + p.fmin : v < p.vmin ? 'V<' + p.vmin : v > p.vmax ? 'V>' + p.vmax : '';
-          relPick(r, on && !!why && !(B.mode === 'GFM' && !B.bus.live), why.startsWith('V') ? p.tv : p.tf, () => (why + ' (f=' + f.toFixed(2) + ' Hz, V=' + v.toFixed(2) + ')'), dt);
-        } else if (r.code === 'BMS') {
+          r._why = why;
+          relPick(r, on && !!why && !(B.mode === 'GFM' && !B.bus.live), why.charCodeAt(0) === 86 ? p.tv : p.tf, WHY.spi, dt);
+        } else if (c === 'BMS') {
           const lim = B.mode === 'GFM' && B.P > (B.fault.derate ? 0.5 : 1) * B.Pn * 1.25;
           if (lim) B.ovT += dt; else B.ovT = 0;
-          relPick(r, on && (B.soc <= p.soc && B.P > 0.01 * B.Pn || B.Tcell > p.T || B.ovT > 1.5 || B.fault.trip), 0.05, () => (B.Tcell > p.T ? 'temperatura celle ' + B.Tcell.toFixed(0) + ' °C' : B.ovT > 1.5 ? 'sovraccarico convertitore' : B.fault.trip ? 'allarme BMS' : 'SoC esaurito'), dt);
+          relPick(r, on && (B.soc <= p.soc && B.P > 0.01 * B.Pn || B.Tcell > p.T || B.ovT > 1.5 || B.fault.trip), 0.05, WHY.bms, dt);
         }
         break;
       }
       case 'bus': {
-        if (r.code === '87B') relPick(r, e._fon === S.n, p.t, () => ('guasto in zona sbarra'), dt);
+        if (c === '87B') relPick(r, e._fon === S.n, p.t, WHY.b87B, dt);
         break;
       }
       case 'br': {
         const br = e, on = brClosed(br) || devClosed(br.brkA) || (br.brkB && devClosed(br.brkB));
-        if (r.code === '87L') relPick(r, br._fon === S.n, p.t, () => ('corrente differenziale'), dt);
-        else if (r.code === '51') { const I = br.I + (br._fon === S.n ? br._fI : 0); if (on) idmt(r, I, dt); }
-        else if (r.code === '49') {
+        if (c === '87L') relPick(r, br._fon === S.n, p.t, WHY.l87L, dt);
+        else if (c === '51') { const I = br.I + (br._fon === S.n ? br._fI : 0); if (on) idmt(r, I, dt); }
+        else if (c === '49') {
           br.th += ((br.load * br.load) - br.th) * dt / p.tau;
-          relPick(r, on && br.th > p.k * p.k, 0, () => ('sovraccarico termico ' + Math.round(Math.sqrt(br.th) * 100) + '%'), dt);
+          relPick(r, on && br.th > p.k * p.k, 0, WHY.l49, dt);
         }
         break;
       }
     }
-  });
+  }
   /* sequenza inversa nei generatori */
-  S.gens.forEach(G => { const V2 = G.bus.V2 || ZERO; G.I2a = devClosed(G.brk) ? cabs(V2) / ((G.x2 + G.xt) / G.Sn) * IB : 0; });
+  for (const G of S.gens) { const V2 = G.bus.V2; G.I2a = devClosed(G.brk) && V2 && (V2.r || V2.i) ? cabs(V2) / ((G.x2 + G.xt) / G.Sn) * IB : 0; }
   /* indicatori di passaggio guasto (RGDAT) */
-  S.faults.forEach(f => {
-    if (!f.on) return;
+  for (const f of S.faults) {
+    if (!f.on) continue;
     f.segs.forEach(sg => {
       const lg = f.kind === 'LG';
       if ((lg && f.Ifa > 1.0) || (!lg && f.Ifa > 60)) { sg.fpi.t += dt; if (sg.fpi.t > 0.04 && !sg.fpi.flag) { sg.fpi.flag = true; sg.fpi.lg = lg; sg.fpi.at = S.t; soe(sg.isl, 'RGDAT: passaggio guasto ' + (lg ? 'a terra' : 'polifase') + ' rilevato su ' + sg.nm, 2, sg); } }
       sg.If = f.Ifa;
     });
-  });
+  }
   /* richiusura automatica */
-  S.feeders.forEach(F => arStep(F, dt));
+  for (const F of S.feeders) arStep(F, dt);
   /* motore rotto dopo parallelo fuori fase */
-  S.gens.forEach(G => { if (G.fault.shaft && G.shaftT > 0) { G.shaftT -= dt; if (G.shaftT <= 0) { G.shaftT = 0; brkCmd(G.brk, 'O', 'vibrazioni elevate / danno meccanico', 'PROT'); emergencyStop(G, 'danno meccanico'); G.blocked = true; } } });
+  for (const G of S.gens) { if (G.fault.shaft && G.shaftT > 0) { G.shaftT -= dt; if (G.shaftT <= 0) { G.shaftT = 0; brkCmd(G.brk, 'O', 'vibrazioni elevate / danno meccanico', 'PROT'); emergencyStop(G, 'danno meccanico'); G.blocked = true; } } }
 }
 /* richiusura rapida + lenta (79) */
 function recOnTrip(F) {

@@ -86,10 +86,11 @@ function spark(cv, keyArr, cols, secs, fixed) {
   const T = S.tf, n = Math.min(T.n, Math.round(secs / 0.01)); if (n < 2) return;
   const idx = k => (T.idx - n + k + TF_N) % TF_N;
   let mn = Infinity, mx = -Infinity;
-  keyArr.forEach(k => { const a = T.ser[k]; for (let i = 0; i < n; i += 5) { const v = a[idx(i)]; if (v > 0.5 || !fixed) { mn = Math.min(mn, v); mx = Math.max(mx, v); } } });
+  const st = Math.max(1, Math.floor(n / Math.max(40, w)));
+  keyArr.forEach(k => { const a = T.ser[k]; for (let i = 0; i < n; i += st) { const v = a[idx(i)]; if (v > 0.5 || !fixed) { mn = Math.min(mn, v); mx = Math.max(mx, v); } } });
   if (fixed) { mn = Math.min(mn, fixed[0]); mx = Math.max(mx, fixed[1]); }
   if (!isFinite(mn)) { mn = 0; mx = 1; } if (mx - mn < 1e-6) mx = mn + 1;
-  keyArr.forEach((k, s) => { const a = T.ser[k]; g.strokeStyle = cols[s]; g.lineWidth = 1.4; g.beginPath(); for (let i = 0; i < n; i += 3) { const v = a[idx(i)], x = w * i / (n - 1), y = 4 + (h - 8) * (mx - v) / (mx - mn); i ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); });
+  keyArr.forEach((k, s) => { const a = T.ser[k]; g.strokeStyle = cols[s]; g.lineWidth = 1.4; g.beginPath(); for (let i = 0; i < n; i += st) { const v = a[idx(i)], x = w * i / (n - 1), y = 4 + (h - 8) * (mx - v) / (mx - mn); i ? g.lineTo(x, y) : g.moveTo(x, y); } g.stroke(); });
   txt(g, mx.toFixed(2), 3, 10, COL.dim, '9px ' + FONTM); txt(g, mn.toFixed(2), 3, h - 3, COL.dim, '9px ' + FONTM);
 }
 function dayChart(cv) {

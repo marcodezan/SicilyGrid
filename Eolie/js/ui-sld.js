@@ -270,8 +270,8 @@ function sldDraw() {
         const c = !I.com ? '#7d8a95' : !N.live ? COL.dead : !N.fuse ? COL.al : N.Vm < 0.92 ? COL.wa : COL.mv;
         g.fillStyle = N.live ? '#0b1a24' : '#0c1014'; g.fillRect(x - bw2 / 2, yTop, bw2, bh);
         g.strokeStyle = nf ? (blinkOn() ? COL.al : '#ffd000') : c; g.lineWidth = 1.6; g.strokeRect(x - bw2 / 2, yTop, bw2, bh);
-        let nm = N.nm; g.font = '600 10px ' + FONTS; while (g.measureText(nm).width > bw2 - 8 && nm.length > 4) nm = nm.slice(0, -2);
-        if (nm !== N.nm) nm += '…';
+        let nm = N._nmc && N._nmw === bw2 ? N._nmc : null;
+        if (!nm) { nm = N.nm; g.font = '600 10px ' + FONTS; while (g.measureText(nm).width > bw2 - 8 && nm.length > 4) nm = nm.slice(0, -2); if (nm !== N.nm) nm += '…'; N._nmc = nm; N._nmw = bw2; }
         txt(g, nm, x, yTop + 13 * k, N.live ? COL.hi : COL.dim, '600 10px ' + FONTS, 'center');
         if (I.com && N.live) {
           txt(g, fP(N.Pl), x, yTop + 26 * k, '#9fd0e4', '9px ' + FONTM, 'center');

@@ -29,6 +29,7 @@ const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const wrapPi = a => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 const gauss = (h, m, s) => Math.exp(-((h - m) * (h - m)) / (2 * s * s));
 const ZERO = cx(0, 0);
+const NOFLT = [];
 
 /* sistema lineare complesso (eliminazione di Gauss con pivot) */
 function csolve(A, b) {
@@ -51,6 +52,44 @@ function csolve(A, b) {
   const x = new Array(n);
   for (let r = n - 1; r >= 0; r--) { let s = v[r]; for (let k = r + 1; k < n; k++) s = csub(s, cmul(M[r][k], x[k])); x[r] = cdiv(s, M[r][r]); }
   return x;
+}
+
+/* versione veloce su array piatti (re/im separati): fattorizzazione LU con pivot parziale
+   riusabile per più termini noti (stessa sequenza di operazioni di csolve, senza oggetti) */
+const LUW = {};
+function luBuf(n) {
+  let w = LUW[n];
+  if (!w) w = LUW[n] = { ar: new Float64Array(n * n), ai: new Float64Array(n * n), br: new Float64Array(n), bi: new Float64Array(n), xr: new Float64Array(n), xi: new Float64Array(n), piv: new Int32Array(n) };
+  return w;
+}
+function luFactor(n, ar, ai, piv) {
+  for (let c = 0; c < n; c++) {
+    let p = c, cc = c * n + c, pm = ar[cc] * ar[cc] + ai[cc] * ai[cc];
+    for (let r = c + 1; r < n; r++) { const q = r * n + c, m = ar[q] * ar[q] + ai[q] * ai[q]; if (m > pm) { pm = m; p = r; } }
+    if (pm < 1e-24) { ar[cc] = 1e-9; ai[cc] = 0; }
+    piv[c] = p;
+    if (p !== c) for (let k = 0; k < n; k++) { const a = c * n + k, b = p * n + k; let t = ar[a]; ar[a] = ar[b]; ar[b] = t; t = ai[a]; ai[a] = ai[b]; ai[b] = t; }
+    const pr = ar[cc], pi = ai[cc], d = pr * pr + pi * pi || 1e-30;
+    for (let r = c + 1; r < n; r++) {
+      const q = r * n + c, mr = ar[q], mi = ai[q];
+      if (mr === 0 && mi === 0) continue;
+      const fr = (mr * pr + mi * pi) / d, fi = (mi * pr - mr * pi) / d;
+      ar[q] = fr; ai[q] = fi; /* moltiplicatore memorizzato al posto dell'elemento eliminato */
+      for (let k = c + 1; k < n; k++) { const a = r * n + k, b = c * n + k; ar[a] -= fr * ar[b] - fi * ai[b]; ai[a] -= fr * ai[b] + fi * ar[b]; }
+    }
+  }
+}
+function luSolve(n, ar, ai, piv, br, bi, xr, xi) {
+  for (let c = 0; c < n; c++) { const p = piv[c]; if (p !== c) { let t = br[c]; br[c] = br[p]; br[p] = t; t = bi[c]; bi[c] = bi[p]; bi[p] = t; } }
+  for (let c = 0; c < n; c++) {
+    for (let r = c + 1; r < n; r++) { const q = r * n + c, fr = ar[q], fi = ai[q]; if (fr === 0 && fi === 0) continue; br[r] -= fr * br[c] - fi * bi[c]; bi[r] -= fr * bi[c] + fi * br[c]; }
+  }
+  for (let r = n - 1; r >= 0; r--) {
+    let sr = br[r], si = bi[r];
+    for (let k = r + 1; k < n; k++) { const a = r * n + k; sr -= ar[a] * xr[k] - ai[a] * xi[k]; si -= ar[a] * xi[k] + ai[a] * xr[k]; }
+    const a = r * n + r, dr = ar[a], di = ai[a], d = dr * dr + di * di || 1e-30;
+    xr[r] = (sr * dr + si * di) / d; xi[r] = (si * dr - sr * di) / d;
+  }
 }
 
 /* generatore pseudo-casuale riproducibile */
@@ -353,29 +392,38 @@ function islandFeederSolve(I) {
   I.feeders.forEach(F => { F.SlNew = ZERO; F.PpvNew = 0; });
   if (n) {
     L.forEach((N, k) => { N.k = k; if (cabs(N.V) < 0.3) N.V = N.headBus.V; });
-    const Y = Array.from({ length: n }, () => Array.from({ length: n }, () => cx(0, 0))), Ib = Array.from({ length: n }, () => cx(0, 0));
-    const addE = (a, b, z, bsh) => { const y = cinv(z); Y[a][a] = cadd(Y[a][a], cadd(y, cx(0, bsh / 2))); Y[b][b] = cadd(Y[b][b], cadd(y, cx(0, bsh / 2))); Y[a][b] = csub(Y[a][b], y); Y[b][a] = csub(Y[b][a], y); };
+    const W = luBuf(n), ar = W.ar, ai = W.ai, br0 = W.br, bi0 = W.bi, VR = W.xr, VI = W.xi;
+    ar.fill(0); ai.fill(0);
+    const IbR = new Float64Array(n), IbI = new Float64Array(n);
+    const addE = (a, b, z, bsh) => {
+      const d = z.r * z.r + z.i * z.i || 1e-30, yr = z.r / d, yi = -z.i / d, sh = bsh / 2;
+      ar[a * n + a] += yr; ai[a * n + a] += yi + sh; ar[b * n + b] += yr; ai[b * n + b] += yi + sh;
+      ar[a * n + b] -= yr; ai[a * n + b] -= yi; ar[b * n + a] -= yr; ai[b * n + a] -= yi;
+    };
     const heads = [];
-    I.feeders.forEach(F => { if (F.live) { const N = F.nodes[0]; const y = cinv(F.segs[0].z); Y[N.k][N.k] = cadd(Y[N.k][N.k], cadd(y, cx(0, F.segs[0].bsh / 2))); Ib[N.k] = cadd(Ib[N.k], cmul(y, F.bus.V)); heads.push(F); } });
+    I.feeders.forEach(F => {
+      if (!F.live) return;
+      const N = F.nodes[0], z = F.segs[0].z, d = z.r * z.r + z.i * z.i || 1e-30, yr = z.r / d, yi = -z.i / d, q = N.k * n + N.k, V0 = F.bus.V;
+      ar[q] += yr; ai[q] += yi + F.segs[0].bsh / 2;
+      IbR[N.k] += yr * V0.r - yi * V0.i; IbI[N.k] += yr * V0.i + yi * V0.r; heads.push(F);
+    });
     I.nodes.forEach(N => { if (!N.live) return; const F = N.fd, k = N.idx; if (k > 0) { const sg = F.segs[k], up = F.nodes[k - 1]; if (sg.sw.closed && up.live) addE(up.k, N.k, sg.z, sg.bsh); } });
     I.ties.forEach(T => { if (T.sw.closed && T.a.live && T.b.live) addE(T.a.k, T.b.k, T.z, T.bsh); });
     /* carico a impedenza costante nella matrice, resto come iniezione */
-    L.forEach(N => { N.yl = cx(N.Pl + N.Sinr.r, -(N.Ql + N.Sinr.i)); Y[N.k][N.k] = cadd(Y[N.k][N.k], N.yl); });
-    let V = L.map(N => N.V);
+    L.forEach(N => { const q = N.k * n + N.k; ar[q] += N.Pl + N.Sinr.r; ai[q] += -(N.Ql + N.Sinr.i); });
+    luFactor(n, ar, ai, W.piv);
+    for (let k = 0; k < n; k++) { VR[k] = L[k].V.r; VI[k] = L[k].V.i; }
     for (let it = 0; it < 3; it++) {
-      const rhs = Ib.map((b, k) => {
-        const N = L[k], v = V[k], vm = Math.max(cabs(v), 1e-3);
-        let inj = b;
-        if (vm > 0.4) {
-          const Sres = cx(N.Pl * (Math.pow(vm, 1.2) - vm * vm), 0);
-          inj = csub(inj, cconj(cdiv(Sres, v)));
-        }
-        if (N.Ppv > 0) { let ip = cconj(cdiv(cx(N.Ppv, 0), v)); const im = cabs(ip), lim = 1.1 * N.Ppv; if (im > lim) ip = csc(ip, lim / im); inj = cadd(inj, ip); }
-        return inj;
-      });
-      V = csolve(Y, rhs);
+      for (let k = 0; k < n; k++) {
+        const N = L[k], vr = VR[k], vi = VI[k], vm = Math.max(Math.hypot(vr, vi), 1e-3), vd = vr * vr + vi * vi || 1e-30;
+        let jr = IbR[k], ji = IbI[k];
+        if (vm > 0.4) { const Pres = N.Pl * (Math.pow(vm, 1.2) - vm * vm); jr -= Pres * vr / vd; ji -= Pres * vi / vd; }
+        if (N.Ppv > 0) { let ir = N.Ppv * vr / vd, ii = N.Ppv * vi / vd; const im = Math.hypot(ir, ii), lim = 1.1 * N.Ppv; if (im > lim) { ir *= lim / im; ii *= lim / im; } jr += ir; ji += ii; }
+        br0[k] = jr; bi0[k] = ji;
+      }
+      luSolve(n, ar, ai, W.piv, br0, bi0, VR, VI);
     }
-    L.forEach((N, k) => { N.V = V[k]; N.Vm = cabs(V[k]); });
+    L.forEach((N, k) => { N.V = cx(VR[k], VI[k]); N.Vm = Math.hypot(VR[k], VI[k]); });
     /* correnti nei tratti e potenze di testa linea */
     heads.forEach(F => {
       const N = F.nodes[0], sg = F.segs[0];
@@ -414,8 +462,32 @@ function pvFactor(I) {
 }
 
 /* ====================== MACCHINE: regolatori e dinamica ====================== */
-function genRunning(G) { return ['ACCELERAZIONE', 'ECCITAZIONE', 'PRONTO', 'IN PARALLELO', 'SCARICO', 'RAFFREDDAMENTO'].indexOf(G.st) >= 0; }
+const RUN_ST = { ACCELERAZIONE: 1, ECCITAZIONE: 1, PRONTO: 1, 'IN PARALLELO': 1, SCARICO: 1, RAFFREDDAMENTO: 1 };
+const EXC_ST = { ECCITAZIONE: 1, PRONTO: 1, 'IN PARALLELO': 1, SCARICO: 1 };
+function genRunning(G) { return RUN_ST[G.st] === 1; }
+/* gruppo fermo, a velocità nulla e separato: solo decadimento del flusso e grandezze termiche
+   (stesse equazioni del caso generale, senza regolatori) */
+function genStepIdle(G, dt) {
+  G.stT += dt;
+  const pe = G.Pe / G.Pn;
+  G.rack = 0; G.boost *= 0.99; G.Pe = 0; G.Qe = 0; G.I = ZERO; G.Ia = 0;
+  G.pef += (pe - G.pef) * dt / 0.4;
+  G.boost += (0 - G.boost) * dt / G.tTurbo;
+  G.Pm = 0;
+  G.d += WB * (G.w - 1) * dt;
+  G.Efd = 0; G.Id = 0;
+  G.Eq += dt / G.Td0p * (G.Efd - G.Eq);
+  if (G.Eq < 0) G.Eq = 0;
+  if (S.n % 10) return;
+  dt *= 10;
+  const tgtT = 30 + (G.fault.cool ? 45 : 0);
+  G.Tc += (tgtT - G.Tc) * dt / (G.fault.cool ? 35 : 60);
+  G.Tex += (30 - G.Tex) * dt / 8;
+  G.oil = Math.max(0, G.oil - dt);
+  G.fuel = 0;
+}
 function genStep(G, dt) {
+  if (G.st === 'FERMO' && G.w === 0 && G.brk.st === 'O') return genStepIdle(G, dt);
   const A = G.bus.area, onLine = isClosed(G.brk);
   G.stT += dt;
   const Pn = G.Pn * G.derate;
@@ -476,7 +548,7 @@ function genStep(G, dt) {
   }
   G.d += WB * (G.w - 1) * dt;
   /* --- eccitazione (AVR PI) e decadimento del flusso --- */
-  const exc = ['ECCITAZIONE', 'PRONTO', 'IN PARALLELO', 'SCARICO'].indexOf(G.st) >= 0;
+  const exc = EXC_ST[G.st] === 1;
   if (exc && !G.fault.lof) {
     const Vt = onLine && G.bus.live ? G.bus.Vm : G.Eq * G.w;
     const e = G.Vref - (onLine ? G.kqd * G.Qe / G.Sn : 0) - Vt;
@@ -548,57 +620,89 @@ function bessStep(B, dt) {
 }
 
 /* ====================== SOLUZIONE RAPIDA DELLA RETE (per area) ====================== */
-function busLoad(bus) {
+function busLoadInto(bus, out) {
   /* somma dei montanti: carico (Sl a Vr) e FV (potenza costante) */
   let P = 0, Q = 0, Ppv = 0, Vr = 1, n = 0;
-  bus.feeders.forEach(F => { if (F.live && isClosed(F.brk)) { P += F.Sl.r; Q += F.Sl.i; Ppv += F.Ppv; Vr = F.Vr; n++; } });
+  for (const F of bus.feeders) if (F.live && isClosed(F.brk)) { P += F.Sl.r; Q += F.Sl.i; Ppv += F.Ppv; Vr = F.Vr; n++; }
   /* servizi ausiliari di centrale */
-  let aux = 0; bus.gens.forEach(g => { if (genRunning(g)) aux += 0.012 * g.Pn; });
+  let aux = 0; for (const g of bus.gens) if (genRunning(g)) aux += 0.012 * g.Pn;
   bus.auxP = aux;
-  return { P: P + aux, Q: Q + aux * 0.6, Ppv, Vr: n ? Vr : 1 };
+  out.P = P + aux; out.Q = Q + aux * 0.6; out.Ppv = Ppv; out.Vr = n ? Vr : 1;
+  return out;
 }
+function busLoad(bus) { return busLoadInto(bus, {}); }
 function areaSolve(A, dt) {
   const k = A.buses.length;
-  const srcG = A.gens.filter(g => genRunning(g) || g.st === 'ARRESTO' || g.Eq * g.w > 0.01);
-  const hasSrc = A.grid || srcG.length > 0 || A.gfm.length > 0;
+  let hasSrc = A.grid || A.gfm.length > 0;
+  if (!hasSrc) for (const g of A.gens) if (genRunning(g) || g.st === 'ARRESTO' || g.Eq * g.w > 0.01) { hasSrc = true; break; }
   if (!hasSrc) { areaDead(A); return; }
-  const Y = Array.from({ length: k }, () => Array.from({ length: k }, () => cx(0, 0))), Ib = Array.from({ length: k }, () => cx(0, 0));
-  const add = (i, y) => { Y[i][i] = cadd(Y[i][i], y); };
-  A.brs.forEach(br => {
-    const a = br.a.idx, b = br.b.idx, y = cinv(br.z), sh = cx(0, br.bsh / 2);
-    add(a, cadd(y, sh)); add(b, cadd(y, sh)); Y[a][b] = csub(Y[a][b], y); Y[b][a] = csub(Y[b][a], y);
-  });
-  /* sorgenti di tensione: macchine, rete, inverter grid-forming */
+  /* sola rete nazionale (nessuna isola collegata): tensione imposta, nulla da risolvere */
+  if (A.grid && k === 1 && !A.gens.length && !A.gfm.length && !A.gfl.length && !S.faults.some(f => f.on && f.bus === A.buses[0])) {
+    const b = A.buses[0]; b.V = cx(S.grid.E, 0); b.Vm = S.grid.E; b.th = 0; b.f = 50; b.fm = 50; b.live = true; b.loadP = 0; b.V2 = ZERO; b.V0 = ZERO;
+    S.grid.P = 0; S.grid.Q = 0; S.grid.I = ZERO; S.grid.Ia = 0; A.live = true; A.flt = []; A.f = 50; return;
+  }
+  /* matrice delle ammettenze su array piatti */
+  const W = luBuf(k), ar = W.ar, ai = W.ai, br0 = W.br, bi0 = W.bi;
+  ar.fill(0); ai.fill(0);
+  const IbR = A._ibr && A._ibr.length === k ? A._ibr : (A._ibr = new Float64Array(k)), IbI = A._ibi && A._ibi.length === k ? A._ibi : (A._ibi = new Float64Array(k));
+  IbR.fill(0); IbI.fill(0);
+  for (const br of A.brs) {
+    const a = br.a.idx, b = br.b.idx, zr = br.z.r, zi = br.z.i, zd = zr * zr + zi * zi, yr = zr / zd, yi = -zi / zd, sh = br.bsh / 2;
+    ar[a * k + a] += yr; ai[a * k + a] += yi + sh; ar[b * k + b] += yr; ai[b * k + b] += yi + sh;
+    ar[a * k + b] -= yr; ai[a * k + b] -= yi; ar[b * k + a] -= yr; ai[b * k + a] -= yi;
+  }
+  /* sorgenti di tensione: macchine, rete, inverter grid-forming (ammettenza puramente reattiva y = -j/X) */
   const src = [];
-  A.gens.forEach(g => { const X = (g.xdp + g.xt) / g.Sn; const y = cx(0, -1 / X); const E = cpol(g.Eq * Math.max(g.w, 0), g.d); add(g.bus.idx, y); Ib[g.bus.idx] = cadd(Ib[g.bus.idx], cmul(E, y)); src.push([g, y, E]); });
-  if (A.grid) { const gb = S.grid.bus, y = cx(0, -1 / S.grid.X), E = cx(S.grid.E, 0); add(gb.idx, y); Ib[gb.idx] = cadd(Ib[gb.idx], cmul(E, y)); src.push([S.grid, y, E]); }
-  A.gfm.forEach(b => { const X = b.Xv * b.xvf / b.Sn; const y = cx(0, -1 / X); const E = cpol(b.E, b.d); add(b.bus.idx, y); Ib[b.bus.idx] = cadd(Ib[b.bus.idx], cmul(E, y)); src.push([b, y, E]); });
+  const addSrc = (m, i, X, Em, Ea) => {
+    const yi = -1 / X, Er = Em * Math.cos(Ea), Ei = Em * Math.sin(Ea);
+    ai[i * k + i] += yi; IbR[i] += -Ei * yi; IbI[i] += Er * yi;
+    src.push([m, cx(0, yi), cx(Er, Ei)]);
+  };
+  for (const g of A.gens) addSrc(g, g.bus.idx, (g.xdp + g.xt) / g.Sn, g.Eq * Math.max(g.w, 0), g.d);
+  if (A.grid) addSrc(S.grid, S.grid.bus.idx, S.grid.X, S.grid.E, 0);
+  for (const b of A.gfm) addSrc(b, b.bus.idx, b.Xv * b.xvf / b.Sn, b.E, b.d);
   /* guasti alimentati */
-  A.flt = S.faults.filter(f => f.on && f.bus && f.bus.area === A);
-  A.flt.forEach(f => { f.y = faultAdm(f, A); if (f.y) add(f.bus.idx, f.y); });
+  A.flt = S.faults.length ? S.faults.filter(f => f.on && f.bus && f.bus.area === A) : NOFLT;
+  for (const f of A.flt) { f.y = faultAdm(f, A); if (f.y) { const i = f.bus.idx; ar[i * k + i] += f.y.r; ai[i * k + i] += f.y.i; } }
   /* carichi */
-  const LD = A.buses.map(b => b.grid ? { P: 0, Q: 0, Ppv: 0, Vr: 1 } : busLoad(b));
-  LD.forEach((L, i) => { L.y = cx(L.P / (L.Vr * L.Vr), -L.Q / (L.Vr * L.Vr)); add(i, L.y); });
-  let V = A.buses.map(b => (cabs(b.V) > 0.2 ? b.V : cpol(1, b.th || 0)));
-  if (!A.live) V = A.buses.map(() => { const s = src[0]; return s ? cpol(Math.max(0.05, cabs(s[2])), carg(s[2])) : cx(1, 0); });
+  const LD = A._ld && A._ld.length === k ? A._ld : (A._ld = A.buses.map(() => ({ P: 0, Q: 0, Ppv: 0, Vr: 1 })));
+  for (let i = 0; i < k; i++) {
+    const bus = A.buses[i], L = LD[i];
+    if (bus.grid) { L.P = 0; L.Q = 0; L.Ppv = 0; L.Vr = 1; }
+    else busLoadInto(bus, L);
+    const v2 = L.Vr * L.Vr; ar[i * k + i] += L.P / v2; ai[i * k + i] += -L.Q / v2;
+  }
+  luFactor(k, ar, ai, W.piv);
+  const VR = A._vr && A._vr.length === k ? A._vr : (A._vr = new Float64Array(k)), VI = A._vi && A._vi.length === k ? A._vi : (A._vi = new Float64Array(k));
+  if (!A.live) { const s0 = src[0]; const m = s0 ? Math.max(0.05, cabs(s0[2])) : 1, an = s0 ? carg(s0[2]) : 0; for (let i = 0; i < k; i++) { VR[i] = m * Math.cos(an); VI[i] = m * Math.sin(an); } }
+  else for (let i = 0; i < k; i++) { const b = A.buses[i], v = b.V; if (cabs(v) > 0.2) { VR[i] = v.r; VI[i] = v.i; } else { const th = b.th || 0; VR[i] = Math.cos(th); VI[i] = Math.sin(th); } }
   for (let it = 0; it < 3; it++) {
-    const rhs = Ib.map((b, i) => {
-      const L = LD[i], v = V[i], vm = Math.max(cabs(v), 1e-4), bus = A.buses[i];
-      let inj = b;
+    for (let i = 0; i < k; i++) {
+      const L = LD[i], vr = VR[i], vi = VI[i], vm = Math.max(Math.hypot(vr, vi), 1e-4), vd = vr * vr + vi * vi || 1e-30, bus = A.buses[i];
+      let jr = IbR[i], ji = IbI[i];
       if (L.P > 0 && vm > 0.3) {
         const fr = 1 + 1.6 * ((bus.fm || 50) - 50) / 50, u = vm / L.Vr;
         const Pres = L.P * (Math.pow(u, 1.2) * fr - u * u);
-        inj = csub(inj, cconj(cdiv(cx(Pres, 0), v)));
+        /* conj(Pres / v) = Pres * v / |v|^2 */
+        jr -= Pres * vr / vd; ji -= Pres * vi / vd;
       }
-      if (L.Ppv > 0 && vm > 0.05) { let ip = cconj(cdiv(cx(L.Ppv, 0), v)); const m = cabs(ip), lim = 1.1 * L.Ppv; if (m > lim) ip = csc(ip, lim / m); inj = cadd(inj, ip); }
-      bus.bess.forEach(b => {
-        if (b.mode !== 'GFL' || !b.run || !isClosed(b.brk) || vm < 0.05) return;
-        let ib = cconj(cdiv(cx(b.P, b.Q), v)); const m = cabs(ib), lim = 1.2 * b.Sn; if (m > lim) ib = csc(ib, lim / m); inj = cadd(inj, ib);
-      });
-      return inj;
-    });
-    V = csolve(Y, rhs);
+      if (L.Ppv > 0 && vm > 0.05) {
+        let ir = L.Ppv * vr / vd, ii = L.Ppv * vi / vd; const m = Math.hypot(ir, ii), lim = 1.1 * L.Ppv;
+        if (m > lim) { ir *= lim / m; ii *= lim / m; }
+        jr += ir; ji += ii;
+      }
+      if (vm >= 0.05) for (const b of bus.bess) {
+        if (b.mode !== 'GFL' || !b.run || !isClosed(b.brk)) continue;
+        /* conj((P + jQ) / v) */
+        let ir = (b.P * vr + b.Q * vi) / vd, ii = (b.P * vi - b.Q * vr) / vd; const m = Math.hypot(ir, ii), lim = 1.2 * b.Sn;
+        if (m > lim) { ir *= lim / m; ii *= lim / m; }
+        jr += ir; ji += ii;
+      }
+      br0[i] = jr; bi0[i] = ji;
+    }
+    luSolve(k, ar, ai, W.piv, br0, bi0, VR, VI);
   }
+  const V = new Array(k); for (let i = 0; i < k; i++) V[i] = cx(VR[i], VI[i]);
   /* uscite */
   /* l'area è in tensione se almeno una sorgente ha forza elettromotrice (anche con tensione collassata da un guasto) */
   const emf = Math.max.apply(null, src.map(s => cabs(s[2])));
@@ -619,25 +723,30 @@ function areaSolve(A, dt) {
     b.th = th; b.live = true;
     b.loadP = LD[i].P - LD[i].Ppv;
   });
-  /* correnti di macchina */
-  src.forEach(([m, y, E]) => {
-    const bus = m.bus, I = cmul(csub(E, bus.V), y), Sx = cmul(bus.V, cconj(I));
-    m.I = I; m.Ia = cabs(I) * IB;
-    if (m === S.grid) { m.P = Sx.r; m.Q = Sx.i; return; }
-    if (m.el === 'gen') { m.Pe = Sx.r; m.Qe = Sx.i; }
-    else { m.P = Sx.r; m.Q = Sx.i; const Ipu = cabs(I) / m.Sn; if (Ipu > m.Imax) m.xvf = Math.min(20, m.xvf * (1 + 4 * (Ipu / m.Imax - 1) * 0.02 + 0.01)); }
-  });
-  A.gfl.forEach(b => { const ib = cconj(cdiv(cx(b.P, b.Q), b.bus.Vm > 0.05 ? b.bus.V : cx(1, 0))); b.I = ib; b.Ia = cabs(ib) * IB; });
+  /* correnti di macchina: I = (E - V)·y con y = j·yi; S = V·conj(I) */
+  for (let q = 0; q < src.length; q++) {
+    const m = src[q][0], yi = src[q][1].i, E = src[q][2], V = m.bus.V;
+    const dr = E.r - V.r, di = E.i - V.i, Ir = -di * yi, Ii = dr * yi;
+    const I = cx(Ir, Ii), P = V.r * Ir + V.i * Ii, Q = V.i * Ir - V.r * Ii, Im = Math.hypot(Ir, Ii);
+    m.I = I; m.Ia = Im * IB;
+    if (m === S.grid) { m.P = P; m.Q = Q; continue; }
+    if (m.el === 'gen') { m.Pe = P; m.Qe = Q; }
+    else { m.P = P; m.Q = Q; const Ipu = Im / m.Sn; if (Ipu > m.Imax) m.xvf = Math.min(20, m.xvf * (1 + 4 * (Ipu / m.Imax - 1) * 0.02 + 0.01)); }
+  }
+  for (const b of A.gfl) { const ib = cconj(cdiv(cx(b.P, b.Q), b.bus.Vm > 0.05 ? b.bus.V : cx(1, 0))); b.I = ib; b.Ia = cabs(ib) * IB; }
   /* rami */
-  A.brs.forEach(br => {
-    const y = cinv(br.z), Ia = cadd(cmul(csub(br.a.V, br.b.V), y), cmul(br.a.V, cx(0, br.bsh / 2)));
-    const Ibb = cadd(cmul(csub(br.b.V, br.a.V), y), cmul(br.b.V, cx(0, br.bsh / 2)));
-    br.Iph = Ia; br.I = cabs(Ia) * IB; br.Sa = cmul(br.a.V, cconj(Ia)); br.Sb = cmul(br.b.V, cconj(Ibb));
+  for (const br of A.brs) {
+    const zr = br.z.r, zi = br.z.i, zd = zr * zr + zi * zi, yr = zr / zd, yi = -zi / zd, sh = br.bsh / 2, Va = br.a.V, Vb = br.b.V;
+    const dr = Va.r - Vb.r, di = Va.i - Vb.i;
+    const iar = dr * yr - di * yi - Va.i * sh, iai = dr * yi + di * yr + Va.r * sh;
+    const ibr = -dr * yr + di * yi - Vb.i * sh, ibi = -dr * yi - di * yr + Vb.r * sh;
+    br.Iph = cx(iar, iai); br.I = Math.hypot(iar, iai) * IB;
+    br.Sa = cx(Va.r * iar + Va.i * iai, Va.i * iar - Va.r * iai); br.Sb = cx(Vb.r * ibr + Vb.i * ibi, Vb.i * ibr - Vb.r * ibi);
     br.load = br.I / br.Imax;
-  });
+  }
   /* correnti di guasto e sequenze */
-  A.buses.forEach(b => { b.V2 = ZERO; b.V0 = ZERO; });
-  A.flt.forEach(f => faultCurrents(f, A));
+  for (const b of A.buses) { b.V2 = ZERO; b.V0 = ZERO; }
+  for (const f of A.flt) faultCurrents(f, A);
   /* frequenza media d'area */
   A.f = A.buses.reduce((a, b) => a + b.fm, 0) / k;
 }
@@ -662,15 +771,15 @@ function z2th(A) {
 function fastStep(dt) {
   S.t += dt; S.n++;
   if (S.topoDirty) topology();
-  S.gens.forEach(g => genStep(g, dt));
-  S.bess.forEach(b => bessStep(b, dt));
+  for (const g of S.gens) genStep(g, dt);
+  for (const b of S.bess) bessStep(b, dt);
   /* quote di ripartizione isocrona per area */
-  S.areas.forEach(A => {
-    let p = 0, pn = 0; A.gens.forEach(g => { if (g.mode === 'ISO' && g.st === 'IN PARALLELO') { p += g.pef * g.Pn; pn += g.Pn; } });
+  for (const A of S.areas) {
+    let p = 0, pn = 0; for (const g of A.gens) if (g.mode === 'ISO' && g.st === 'IN PARALLELO') { p += g.pef * g.Pn; pn += g.Pn; }
     A.isoShare = pn > 0 ? p / pn : 0;
-  });
+  }
   faultsEnergize();
-  S.areas.forEach(A => areaSolve(A, dt));
+  for (const A of S.areas) areaSolve(A, dt);
   /* rocof (finestra 100 ms) */
   if (S.n % 20 === 0) S.buses.forEach(b => { const fp = b.fPrev === undefined ? b.fm : b.fPrev; b.rocof += (((b.fm - fp) / 0.02) - b.rocof) * 0.2; b.fPrev = b.fm; });
   feederFast();
@@ -683,21 +792,31 @@ function fastStep(dt) {
 }
 /* correnti di testa linea nel passo rapido (carico + guasti a valle) */
 function feederFast() {
-  S.feeders.forEach(F => {
+  const fl = S.faults;
+  for (const F of S.feeders) {
     const b = F.bus;
-    if (!isClosed(F.brk) || !b.live) { F.I1 = ZERO; F.I2 = ZERO; F.I0 = ZERO; F.Iph = [0, 0, 0]; F.Iamp = 0; F.P = 0; F.Q = 0; return; }
+    if (!isClosed(F.brk) || !b.live) { if (F.Iamp !== 0 || F.P !== 0) { F.I1 = ZERO; F.I2 = ZERO; F.I0 = ZERO; F.Iph = [0, 0, 0]; F.Iamp = 0; F.P = 0; F.Q = 0; } else F.I0 = ZERO; continue; }
     const u = b.Vm / (F.Vr || 1), fr = 1 + 1.6 * ((b.fm || 50) - 50) / 50;
-    const Sl = cx(F.Sl.r * Math.pow(u, 1.2) * fr - F.Ppv, F.Sl.i * u * u);
-    let I1 = b.Vm > 0.05 ? cconj(cdiv(Sl, b.V)) : ZERO, I2 = ZERO, I0 = ZERO;
-    S.faults.forEach(f => { if (f.on && f.fd === F && f.I1) { I1 = cadd(I1, f.I1); I2 = cadd(I2, f.I2 || ZERO); } });
+    const Sr = F.Sl.r * Math.pow(u, 1.2) * fr - F.Ppv, Si = F.Sl.i * u * u;
+    const vr = b.V.r, vi = b.V.i, vd = vr * vr + vi * vi || 1e-30;
+    /* I1 = conj(S / V) */
+    let i1r = 0, i1i = 0, i2r = 0, i2i = 0;
+    if (b.Vm > 0.05) { i1r = (Sr * vr + Si * vi) / vd; i1i = (Sr * vi - Si * vr) / vd; }
+    for (let k = 0; k < fl.length; k++) { const f = fl[k]; if (f.on && f.fd === F && f.I1) { i1r += f.I1.r; i1i += f.I1.i; if (f.I2) { i2r += f.I2.r; i2i += f.I2.i; } } }
     /* corrente omopolare: capacitiva propria oppure guasto a terra a valle */
-    I0 = F.I0f || ZERO;
-    F.I1 = I1; F.I2 = I2; F.I0 = I0;
-    const Ia = cadd(cadd(I0, I1), I2), Ibp = cadd(cadd(I0, cmul(AOP2, I1)), cmul(AOP, I2)), Icp = cadd(cadd(I0, cmul(AOP, I1)), cmul(AOP2, I2));
-    F.Iph = [cabs(Ia) * IB, cabs(Ibp) * IB, cabs(Icp) * IB];
-    F.Iamp = Math.max(F.Iph[0], F.Iph[1], F.Iph[2]);
-    const Sx = cmul(b.V, cconj(I1)); F.P = Sx.r; F.Q = Sx.i;
-  });
+    const I0 = F.I0f || ZERO;
+    F.I1 = cx(i1r, i1i); F.I2 = i2r || i2i ? cx(i2r, i2i) : ZERO; F.I0 = I0;
+    /* correnti di fase: Ia = I0+I1+I2, Ib = I0+a²I1+aI2, Ic = I0+aI1+a²I2 */
+    const ar = AOP.r, ai = AOP.i, br2 = AOP2.r, bi2 = AOP2.i;
+    const xa = I0.r + i1r + i2r, ya = I0.i + i1i + i2i;
+    const xb = I0.r + (br2 * i1r - bi2 * i1i) + (ar * i2r - ai * i2i), yb = I0.i + (br2 * i1i + bi2 * i1r) + (ar * i2i + ai * i2r);
+    const xc = I0.r + (ar * i1r - ai * i1i) + (br2 * i2r - bi2 * i2i), yc = I0.i + (ar * i1i + ai * i1r) + (br2 * i2i + bi2 * i2r);
+    const A1 = Math.hypot(xa, ya) * IB, B1 = Math.hypot(xb, yb) * IB, C1 = Math.hypot(xc, yc) * IB;
+    const ph = F.Iph; ph[0] = A1; ph[1] = B1; ph[2] = C1;
+    F.Iamp = Math.max(A1, B1, C1);
+    /* S = V · conj(I1) */
+    F.P = vr * i1r + vi * i1i; F.Q = vi * i1r - vr * i1i;
+  }
 }
 function slowStep(dt) {
   if (!S.settling) S.clk += dt * S.clkSpeed;
