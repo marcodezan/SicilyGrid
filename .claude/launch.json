@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "eolie", "runtimeExecutable": "python", "runtimeArgs": ["-m", "http.server", "8765", "--directory", "Eolie"], "port": 8765 }
+  ]
+}

@@ -1,0 +1,121 @@
+/* =====================================================================
+   STILE "SALA CONTROLLO": palette sobria (grigi neutri, colore solo per
+   stati e anomalie), niente bagliori, sfumature o forme arrotondate.
+   ===================================================================== */
+:root {
+  --bg: #13171b; --pn: #1a1f25; --pn2: #20262d; --bd: #29313a; --bd2: #36404b;
+  --tx: #a5b0ba; --hi: #e3e8ec; --dim: #6c7884;
+  --mv: #5a9fcf; --dead: #4a545e; --ok: #4aad6f; --wa: #d6a73c; --al: #df4a4f; --mag: #c06cb3; --or: #d98a3d;
+  --acc: #5a9fcf;
+  --sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: Consolas, "Cascadia Mono", "SF Mono", Menlo, monospace;
+}
+html, body { background: var(--bg); font-family: var(--sans); }
+#app { gap: 2px; padding: 2px; background: #0f1215; }
+header#top, aside, #center, footer { background: var(--pn); border-color: var(--bd); border-radius: 0; }
+.ph { background: #171c21; color: #8996a2; letter-spacing: .1em; font-weight: 600; }
+.tabs { background: #171c21; }
+.tabs button { color: #94a0ab; display: inline-flex; align-items: center; gap: 6px; }
+.tabs button.on { background: var(--pn); color: var(--hi); box-shadow: inset 0 -2px 0 var(--acc); }
+.tabs .ico { opacity: .85; }
+
+/* intestazione */
+.brand b { letter-spacing: .14em; font-size: 13px; font-weight: 700; }
+.brand small { letter-spacing: .02em; }
+.logo { width: 28px; height: 28px; border-radius: 2px; background: #22303c; border: 1px solid #3b5468; box-shadow: none; color: #cfe3f2; font: 700 11px var(--sans); letter-spacing: .04em; }
+.timebox { border-color: var(--bd); }
+.clock b { font-weight: 600; font-family: var(--mono); }
+.seg { border-radius: 2px; border-color: var(--bd2); }
+.seg button { background: #171c21; font-family: var(--mono); }
+.seg button.on { background: #2a3a48; box-shadow: inset 0 -2px 0 var(--acc); }
+.search { border-radius: 2px; background: #171c21; }
+.search .ico { opacity: .8; }
+kbd { border-radius: 2px; background: #20262d; }
+.score { border-color: var(--bd); }
+.score i { border-radius: 2px; }
+
+/* pulsanti */
+.btn { background: #20262d; border-color: var(--bd2); border-radius: 2px; color: var(--hi); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.row .btn { justify-content: center; }
+.btn:hover { background: #28313a; }
+.btn.icon { width: 30px; height: 28px; }
+.btn.on { background: #263746; border-color: var(--acc); }
+.btn.hi { border-color: #6d5a2b; color: #e2c47c; background: #221f17; }
+.btn.hi:hover { background: #2b271b; }
+.btn.dg { border-color: #6a3135; color: #f0a0a2; }
+.btn.go { border-color: #2f6142; color: #9fdcb5; }
+.btn.wa { border-color: #6d5a2b; color: #e2c47c; }
+.btn.alm.blink { background: #3c1a1c; border-color: var(--al); }
+.pb button { border-radius: 2px; display: inline-grid; place-items: center; background: #20262d; }
+.pb button .ico { width: 12px; height: 12px; }
+select, input[type=number], input[type=text], input:not([type]) { border-radius: 2px; background: #171c21; border-color: var(--bd2); }
+
+/* elenchi e schede */
+.isl { border-radius: 0; background: #1d2329; border-color: var(--bd); }
+.isl:hover { background: #222a31; }
+.isl.sel { border-color: var(--acc); background: #1f2933; }
+.isl .lamp { box-shadow: none !important; }
+.sec { border-radius: 0; background: #1d2329; border-color: var(--bd); }
+.sec > h5 { color: #9aa8b4; letter-spacing: .08em; }
+.sec > h5::before { color: #6c7884; }
+.fpTabs button { border-radius: 0; background: #1d2329; }
+.fpTabs button.on { border-color: var(--acc); background: #222c35; }
+.state { border-radius: 2px; font-weight: 600; }
+.hero { background: #1d2329; border-radius: 0; border-color: var(--bd2); }
+.hero .ic { border-radius: 2px; background: #171c21; color: #b9c6d1; font-size: 18px; }
+.hero .hk div { border-radius: 0; background: #171c21; }
+.hero .ha .btn { justify-content: flex-start; }
+.confirm { background: #24200f; border-color: #6d5a2b; }
+.warn { border-radius: 0; }
+.led.on { box-shadow: none; } .led.pk { box-shadow: none; } .led.g { box-shadow: none; }
+
+/* dashboard */
+#dash, #dashIn { background: var(--bg); }
+.dsel button { border-radius: 2px; background: #1d2329; display: inline-flex; align-items: center; gap: 6px; }
+.dsel button.on { background: #263746; border-color: var(--acc); }
+.tile, .card, .dbox { border-radius: 0; background: #1d2329; border-color: var(--bd); }
+.tile b { font-weight: 600; }
+.card:hover { border-color: #3c5466; }
+.card.bad { box-shadow: none; border-color: #7a3135; }
+.dbox h5 { color: #9aa8b4; letter-spacing: .08em; }
+.mbar { border-radius: 0; }
+.goal { border-radius: 0; background: #221f15; border-color: #5c4d27; color: #e2d2a4; }
+.goal.done { background: #15241b; border-color: #2f6142; color: #a9dcbc; }
+.goaltxt { color: #d9bf7f; }
+
+/* finestre, menu, ricerca, notifiche */
+.mbox { border-radius: 0; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+.mh { background: #171c21; }
+#menuBox, #ctx, .pbox { border-radius: 0; box-shadow: 0 10px 28px rgba(0,0,0,.5); background: #1c2228; }
+.mi, #ctx .ci, .pi { border-radius: 0; }
+.mi:hover, #ctx .ci:hover, .pi.on, .pi:hover { background: #263746; }
+#ctx .ci span { color: #8fb4d2; display: inline-grid; place-items: center; }
+#ctx .ch .ic { color: #b9c6d1; }
+.mi .ico { color: #8fb4d2; }
+.mi i:not(.ico) { border-radius: 1px; }
+.mi.on i:not(.ico) { background: var(--acc); border-color: var(--acc); }
+#toast div { border-radius: 0; background: #2a1719; border-color: #7a3135; color: #f1d6d7; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+#toast div.i { background: #1b2733; border-color: #3c5466; color: #d5e2ec; }
+.wcard { border-radius: 0; background: #1d2329; }
+.wcard:hover { transform: none; background: #222c35; border-color: var(--acc); }
+.wcard span { font-size: 22px; color: #9cc0dc; }
+.win .big { color: var(--ok); text-shadow: none; font-size: 36px; }
+.scn { border-radius: 0; background: #1d2329; }
+.scn .tag { color: #8fb4d2; }
+#tourHole { border-radius: 0; box-shadow: 0 0 0 9999px rgba(8,10,12,.7); border-color: var(--acc); }
+#tourCard { border-radius: 0; border-color: var(--acc); }
+#splash { background: var(--bg); }
+#splash .logo { width: 48px; height: 48px; font-size: 16px; border-radius: 2px; }
+#splash b { letter-spacing: .25em; font-size: 15px; }
+
+/* barre su mappa e schema */
+#mapBar .mgrp, #zoomBar { border-radius: 0; background: rgba(26,31,37,.95); }
+#mapBar button { display: inline-flex; align-items: center; gap: 5px; }
+#mapBar button.on, .seg button.on { box-shadow: inset 0 -2px 0 var(--acc); }
+#zoomBar button { display: grid; place-items: center; }
+#banner { border-radius: 0; background: rgba(58,22,24,.95); }
+#tip { background: rgba(23,28,33,.97); border-color: var(--bd2); }
+
+/* oscilloscopio e tabelle */
+#scopeRd, .soebar { background: #171c21; }
+table.dt td, #almT td, #soeT td { border-color: #232a31; }

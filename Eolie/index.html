@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Eolie Grid · Centro di controllo</title>
+<link rel="stylesheet" href="css/scada.css?v=31">
+<link rel="stylesheet" href="css/ux.css?v=31">
+<link rel="stylesheet" href="css/icons.css?v=31">
+<link rel="stylesheet" href="css/pro.css?v=31">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand" data-a="home" title="Torna alla panoramica"><span class="logo">EG</span><div><b>EOLIE GRID</b><small>Centro di controllo reti isolane</small></div></div>
+    <div class="timebox">
+      <div class="clock"><small id="hDate">—</small><b id="hClock">--:--:--</b></div>
+      <button id="bPause" class="btn icon" title="Pausa / riprendi (barra spaziatrice)"><i class="ico ico-pause"></i></button>
+      <div class="seg" id="segClk" title="Velocità della giornata simulata">
+        <button data-v="1">1×</button><button data-v="5">5×</button><button data-v="20" class="on">20×</button><button data-v="60">60×</button><button data-v="120">120×</button>
+      </div>
+    </div>
+    <div class="kpis" id="kpis" hidden></div>
+    <span class="hsp"></span>
+    <button class="search" id="bSearch" title="Cerca isole, componenti, imprevisti e comandi (Ctrl+K)"><i class="ico ico-search"></i> <span>Cerca</span><kbd>Ctrl K</kbd></button>
+    <div class="score" id="score" title="Punteggio e qualità del servizio · clic per il dettaglio"><small>PUNTI</small><b id="scPts">0</b><i id="scGrade">A</i></div>
+    <button id="bAlm" class="btn alm" title="Allarmi da riconoscere · clic per l'elenco"><i class="ico ico-bell"></i> <b id="almN">0</b></button>
+    <button id="emsBadge" class="btn wa" data-a="emsAll" title="Automazione disinserita: clic per reinserirla su tutte le isole" style="display:none"></button>
+    <button id="bScen" class="btn hi" title="Avvia un imprevisto da gestire"><i class="ico ico-bolt"></i><span> Imprevisti</span></button>
+    <div class="hmenu">
+      <button id="bMenu" class="btn icon" data-a="menu" title="Menu"><i class="ico ico-menu"></i></button>
+      <div id="menuBox" class="hidden">
+        <div class="mlab">Pannelli</div>
+        <button class="mi" data-a="ptog" data-p="left" id="dk-left"><i></i>Elenco isole</button>
+        <button class="mi" data-a="ptog" data-p="right" id="dk-right"><i></i>Pannello comandi</button>
+        <button class="mi" data-a="ptog" data-p="bottom" id="dk-bottom"><i></i>Strumenti (oscilloscopio, trend, eventi)</button>
+        <div class="mlab">Automazione</div>
+        <button class="mi" id="bEms" data-a="emsAll"></button>
+        <div class="mlab">Simulazione</div>
+        <button class="mi" id="bSlow">Moviola</button>
+        <button class="mi" id="bMode" data-a="mode">BASE</button>
+        <button class="mi" id="bSnd">Suono</button>
+        <button class="mi" id="bAck"><i class="ico ico-check"></i> Riconosci tutti gli allarmi</button>
+        <div class="mlab">Altro</div>
+        <button class="mi" id="bSet"><i class="ico ico-gear"></i> Impostazioni</button>
+        <button class="mi" id="bHelp"><i class="ico ico-help"></i> Aiuto, tour e scorciatoie</button>
+      </div>
+    </div>
+  </header>
+
+  <aside id="left" class="panel">
+    <div class="ph"><span>Reti isolane</span><span class="pb"><button data-a="pmin" data-p="left" title="Chiudi pannello"><i class="ico ico-x"></i></button></span></div>
+    <div id="islList"></div>
+    <div class="ph"><span>Arcipelago</span></div>
+    <canvas id="mini"></canvas>
+  </aside>
+
+  <section id="center" class="panel">
+    <div class="tabs" id="ctabs">
+      <button data-tab="dash" class="on"><i class="ico ico-dashboard"></i> Dashboard</button>
+      <button data-tab="sld"><i class="ico ico-schema"></i> Schema unifilare</button>
+      <button data-tab="map"><i class="ico ico-map"></i> Mappa rete</button>
+      <span class="sp"></span>
+      <span id="islTitle"></span>
+      <button id="bFit" title="Adatta lo schema alla finestra"><i class="ico ico-fit"></i></button>
+      <span class="pb"><button data-a="pmax" data-p="center" title="Ingrandisci / ripristina"><i class="ico ico-expand"></i></button></span>
+    </div>
+    <div class="cv" id="cvWrap"><canvas id="cv"></canvas><div id="tip"></div><div id="banner"></div><div id="dash"></div></div>
+  </section>
+
+  <aside id="right" class="panel">
+    <div class="ph"><span id="fpTitle">Seleziona un componente</span><span class="pb"><button data-a="pmax" data-p="right" title="Allarga / ripristina"><i class="ico ico-width"></i></button><button data-a="pmin" data-p="right" title="Chiudi pannello"><i class="ico ico-x"></i></button></span></div>
+    <div id="fp"></div>
+  </aside>
+
+  <footer id="bottom" class="panel">
+    <div class="tabs" id="btabs">
+      <button data-tab="scope" class="on"><i class="ico ico-scope"></i> Oscilloscopio</button>
+      <button data-tab="trend"><i class="ico ico-trend"></i> Trend</button>
+      <button data-tab="alm"><i class="ico ico-bell"></i> Allarmi <b id="almN2"></b></button>
+      <button data-tab="soe"><i class="ico ico-list"></i> Eventi</button>
+      <span class="sp"></span>
+      <span class="pb"><button data-a="pmax" data-p="bottom" title="Ingrandisci / ripristina"><i class="ico ico-expand"></i></button><button data-a="pmin" data-p="bottom" title="Chiudi pannello"><i class="ico ico-x"></i></button></span>
+    </div>
+    <div class="bp on" id="bp-scope">
+      <div id="scopeWrap"><canvas id="scope"></canvas><div id="scopeRd"></div></div>
+      <div id="scopeSide"><canvas id="phasor"></canvas><div id="scopeCtl"></div></div>
+    </div>
+    <div class="bp" id="bp-trend"><canvas id="trend"></canvas><div id="trendCtl"></div></div>
+    <div class="bp" id="bp-alm"><div class="tblwrap"><table id="almT"></table></div></div>
+    <div class="bp" id="bp-soe"><div class="soebar"><select id="soeIsl"></select><input id="soeQ" placeholder="filtra testo…"><label><input type="checkbox" id="soeImp"> solo eventi rilevanti</label></div><div class="tblwrap" id="soeW"><table id="soeT"></table></div></div>
+  </footer>
+</div>
+
+<div id="modal" class="hidden"><div class="mbox"><div class="mh"><b id="mTitle"></b><button class="btn icon" id="mClose" title="Chiudi"><i class="ico ico-x"></i></button></div><div id="mBody"></div></div></div>
+<div id="toast"></div>
+<div id="ctx"></div>
+<div id="pal" class="hidden"><div class="pbox"><input id="palQ" placeholder="Cerca un'isola, un gruppo, una linea, una cabina, un imprevisto o un comando…" autocomplete="off"><div id="palL"></div><div class="phint">↑↓ per scegliere · Invio per aprire · Esc per chiudere</div></div></div>
+<div id="tour" class="hidden"><div id="tourHole"></div><div id="tourCard"></div></div>
+<div id="splash"><div><span class="logo">EG</span><b>EOLIE GRID</b><small>Avvio della simulazione</small></div></div>
+
+<script src="js/geo.js?v=31"></script>
+<script src="js/data.js?v=31"></script>
+<script src="js/engine.js?v=31"></script>
+<script src="js/prot.js?v=31"></script>
+<script src="js/ctrl.js?v=31"></script>
+<script src="js/rec.js?v=31"></script>
+<script src="js/ui-core.js?v=31"></script>
+<script src="js/scen.js?v=31"></script>
+<script src="js/ui-sld.js?v=31"></script>
+<script src="js/ui-map.js?v=31"></script>
+<script src="js/ui-face.js?v=31"></script>
+<script src="js/ui-scope.js?v=31"></script>
+<script src="js/ui-dash.js?v=31"></script>
+<script src="js/ui-main.js?v=31"></script>
+<script src="js/ui-ux.js?v=31"></script>
+</body>
+</html>

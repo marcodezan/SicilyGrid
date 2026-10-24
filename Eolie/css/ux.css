@@ -1,0 +1,127 @@
+/* ===================== rifinitura prodotto ===================== */
+.brand { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.brand > div { display: flex; flex-direction: column; }
+.logo { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #1a6fa8, #36b9ff); color: #fff; font-size: 16px; box-shadow: 0 0 12px rgba(54,185,255,.35); }
+.timebox { display: flex; align-items: center; gap: 6px; padding: 0 8px; border-left: 1px solid var(--bd); border-right: 1px solid var(--bd); }
+.btn.icon { width: 32px; height: 30px; padding: 0; display: inline-grid; place-items: center; font-size: 14px; }
+#bSlow { width: auto; min-width: 32px; padding: 0 6px; }
+.seg { display: inline-flex; border: 1px solid var(--bd2); border-radius: 4px; overflow: hidden; }
+.seg button { background: #0b1218; border: 0; border-right: 1px solid var(--bd); color: var(--tx); padding: 5px 7px; cursor: pointer; font: 600 11px var(--mono); }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: #13324a; color: #fff; box-shadow: inset 0 -2px 0 var(--mv); }
+.search { display: flex; align-items: center; gap: 6px; background: #0b1218; border: 1px solid var(--bd2); color: var(--dim); padding: 5px 8px; border-radius: 4px; cursor: pointer; min-width: 150px; }
+.search:hover { border-color: var(--mv); color: var(--tx); }
+.search span { flex: 1; text-align: left; }
+kbd { font: 10px var(--mono); border: 1px solid var(--bd2); border-radius: 3px; padding: 1px 4px; color: var(--tx); background: #10181f; }
+.btn { transition: background .12s, border-color .12s; }
+.btn:focus-visible, .seg button:focus-visible, .search:focus-visible { outline: 2px solid var(--mv); outline-offset: 1px; }
+#toast div.go { cursor: pointer; pointer-events: auto; }
+#toast div.go::after { content: '  →'; color: #9fd8ff; }
+
+/* menu rapido */
+#ctx { position: fixed; display: none; z-index: 40; min-width: 270px; max-width: 340px; background: rgba(10, 16, 21, .98); border: 1px solid var(--bd2); border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.6); padding: 4px; zoom: var(--z, 1); }
+#ctx .ch { display: flex; align-items: center; gap: 8px; padding: 6px 6px 8px; border-bottom: 1px solid var(--bd); margin-bottom: 4px; }
+#ctx .ch .ic { font-size: 18px; width: 26px; text-align: center; }
+#ctx .ch > div { flex: 1; min-width: 0; }
+#ctx .ch b { display: block; color: var(--hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ctx .ch small { color: var(--dim); font-size: 10px; }
+#ctx .state { font-size: 9px; padding: 1px 5px; white-space: nowrap; }
+#ctx .ci { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left; background: none; border: 0; color: var(--hi); padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+#ctx .ci span { width: 18px; text-align: center; color: var(--mv); }
+#ctx .ci:hover { background: #13324a; }
+#ctx .ci.dg span { color: #ff8a8a; } #ctx .ci.go span { color: var(--ok); } #ctx .ci.wa span { color: var(--wa); }
+#ctx hr { border: 0; border-top: 1px solid var(--bd); margin: 4px 0; }
+#ctx .ask { padding: 6px; } #ctx .ask p { margin: 0 0 6px; color: #ffe2a0; }
+
+/* scheda componente */
+.hero { background: linear-gradient(180deg, #0f1c25, #0b141a); border: 1px solid var(--bd2); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.hero .hh { display: flex; align-items: center; gap: 8px; }
+.hero .ic { font-size: 20px; width: 32px; height: 32px; display: grid; place-items: center; background: #0a1318; border: 1px solid var(--bd); border-radius: 6px; flex: none; }
+.hero .ht { flex: 1; min-width: 0; }
+.hero .ht b { display: block; color: var(--hi); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero .ht small { color: var(--dim); font-size: 10px; }
+.hero .hk { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0 6px; }
+.hero .hk div { background: #081016; border: 1px solid var(--bd); border-radius: 4px; padding: 4px 6px; min-width: 0; }
+.hero .hk small { display: block; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.hero .hk span { font: 600 13px var(--mono); color: var(--hi); white-space: nowrap; }
+.hero .ha { display: flex; flex-direction: column; gap: 4px; }
+.hero .ha .btn { text-align: left; }
+
+/* ricerca */
+#pal { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.5); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
+#pal.hidden { display: none; }
+.pbox { width: min(640px, 92vw); background: var(--pn); border: 1px solid var(--bd2); border-radius: 8px; box-shadow: 0 20px 50px rgba(0,0,0,.6); overflow: hidden; zoom: var(--z, 1); }
+#palQ { width: 100%; border: 0; border-bottom: 1px solid var(--bd); background: #0b1218; padding: 14px 16px; font-size: 15px; color: var(--hi); outline: none; border-radius: 0; }
+#palL { max-height: 52vh; overflow: auto; padding: 4px; }
+.pi { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center; padding: 7px 10px; border-radius: 5px; cursor: pointer; }
+.pi .ic { text-align: center; } .pi b { color: var(--hi); font-weight: 500; } .pi small { color: var(--dim); }
+.pi.on, .pi:hover { background: #13324a; }
+.phint { padding: 6px 12px; font-size: 10px; color: var(--dim); border-top: 1px solid var(--bd); }
+
+/* tour */
+#tour { position: fixed; inset: 0; z-index: 60; }
+#tour.hidden { display: none; }
+#tourHole { position: fixed; border: 2px solid var(--mv); border-radius: 6px; box-shadow: 0 0 0 9999px rgba(2,5,8,.72), 0 0 18px rgba(54,185,255,.6); transition: all .3s ease; pointer-events: none; }
+#tourCard { position: fixed; background: var(--pn); border: 1px solid var(--mv); border-radius: 8px; padding: 12px 14px; box-shadow: 0 12px 40px rgba(0,0,0,.6); transition: left .3s, top .3s; }
+#tourCard small { color: var(--mv); font: 600 10px var(--mono); }
+#tourCard b { display: block; color: var(--hi); font-size: 15px; margin: 2px 0 6px; }
+#tourCard p { margin: 0 0 10px; line-height: 1.5; }
+#tourCard .row { justify-content: flex-end; }
+#tourCard .row .btn { flex: 0 0 auto; }
+
+/* benvenuto, vittoria */
+.welcome .lead { font-size: 14px; line-height: 1.55; color: #c7d4dc; margin-top: 0; }
+.wcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin: 12px 0; }
+.wcard { background: #0b151c; border: 1px solid var(--bd2); border-radius: 8px; padding: 16px; text-align: left; cursor: pointer; color: var(--tx); display: flex; flex-direction: column; gap: 4px; }
+.wcard:hover { border-color: var(--mv); background: #0f1f2a; }
+.wcard span { font-size: 26px; } .wcard b { color: var(--hi); font-size: 14px; } .wcard small { color: var(--dim); }
+.win { text-align: center; } .win .big { font-size: 44px; color: var(--ok); text-shadow: 0 0 20px rgba(51,224,122,.5); } .win > b { color: var(--hi); font-size: 15px; }
+.mbox { border-radius: 8px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,.6); }
+
+/* splash */
+#splash { position: fixed; inset: 0; z-index: 100; background: #05080b; display: grid; place-items: center; transition: opacity .5s; }
+#splash.out { opacity: 0; pointer-events: none; }
+#splash > div { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+#splash .logo { width: 56px; height: 56px; font-size: 28px; border-radius: 14px; }
+#splash b { color: var(--hi); letter-spacing: .3em; font-size: 18px; } #splash small { color: var(--dim); }
+
+/* barra della mappa */
+#mapBar { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 3; display: none; gap: 8px; flex-wrap: wrap; align-items: flex-start; pointer-events: none; zoom: var(--z, 1); }
+#mapBar .mgrp { display: inline-flex; flex-wrap: wrap; background: rgba(8,13,18,.92); border: 1px solid var(--bd2); border-radius: 6px; overflow: hidden; pointer-events: auto; }
+#mapBar button { background: none; border: 0; border-right: 1px solid var(--bd); color: var(--tx); padding: 5px 9px; cursor: pointer; font-size: 11px; }
+#mapBar button:hover { color: var(--hi); background: #13324a; }
+#mapBar button.on { color: #fff; background: #13324a; box-shadow: inset 0 -2px 0 var(--mv); }
+#mapHint { width: 100%; color: var(--dim); font-size: 10px; text-shadow: 0 1px 2px #000; }
+
+/* finestre strette */
+@media (max-width: 1500px) { .kpis .kpi:nth-child(n+3) { display: none; } .brand small { display: none; } .search span { display: none; } .search { min-width: 0; } }
+@media (max-width: 1250px) { .kpis { display: none; } .clock small { display: none; } .dock .btn { padding: 2px 6px; } }
+@media (max-width: 1000px) { .brand > div { display: none; } .score small { display: none; } }
+
+.dock i { font-style: normal; }
+@media (max-width: 1250px) { .dock span { display: none; } }
+@media (max-width: 1000px) { #bScen span { display: none; } .timebox .seg button { padding: 5px 5px; } #bMode { padding: 2px 5px; } }
+#top { overflow: hidden; }
+
+/* intestazione essenziale e menu */
+.hsp { flex: 1; }
+#top { gap: 10px; }
+.hmenu { position: relative; }
+#menuBox { position: fixed; right: 10px; top: calc(56px * var(--z, 1)); z-index: 45; width: 300px; background: rgba(10,16,21,.98); border: 1px solid var(--bd2); border-radius: 8px; box-shadow: 0 14px 40px rgba(0,0,0,.6); padding: 6px; }
+#menuBox.hidden { display: none; }
+.mlab { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); padding: 8px 8px 3px; }
+.mi { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: 0; color: var(--hi); padding: 7px 8px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+.mi:hover { background: #13324a; }
+.mi i { width: 14px; height: 14px; border: 1px solid var(--bd2); border-radius: 3px; flex: none; display: grid; place-items: center; font-style: normal; font-size: 10px; }
+.mi.on i { background: var(--mv); border-color: var(--mv); }
+.mi.on i::after { content: '✓'; color: #04121c; font-weight: 700; }
+#bAlm { min-width: 54px; }
+
+/* controlli di zoom */
+#zoomBar { position: absolute; right: 10px; bottom: 26px; z-index: 3; display: none; flex-direction: column; background: rgba(8,13,18,.92); border: 1px solid var(--bd2); border-radius: 6px; overflow: hidden; zoom: var(--z, 1); }
+#zoomBar button { width: 34px; height: 32px; background: none; border: 0; border-bottom: 1px solid var(--bd); color: var(--hi); font-size: 16px; cursor: pointer; }
+#zoomBar button:last-child { border-bottom: 0; }
+#zoomBar button:hover { background: #13324a; }
+
+#mapBar .wx button { font-size: 12px; }
+#mapBar .wx .wxb { font-size: 14px; padding: 3px 8px; }
