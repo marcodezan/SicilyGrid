@@ -210,10 +210,20 @@ function mapOverlay(g, X, Y, v) {
   const det = v.z > 30, t = SLD.t;
   /* flussi di potenza animati */
   if (MAP.lay.flow && !UI.lowGfx) {
-    g.save(); g.lineWidth = Math.max(1.5, Math.min(3, v.z / 30)); g.setLineDash([3, 11]); g.lineCap = 'round';
-    S.isl.forEach(I => { if (!I.com) return; const pp = projLL(I.plant); I.feeders.forEach(F => { let prev = [X(pp[0]), Y(pp[1])]; F.nodes.forEach((N, k) => { const q = projLL(N.ll), Q = [X(q[0]), Y(q[1])], sg = F.segs[k]; if (sg.I > 0.5 && N.live) { const sp = 18 + Math.min(60, sg.I / 3); g.lineDashOffset = -t * sp; g.strokeStyle = 'rgba(220,245,255,.75)'; const fwd = N.via === sg; g.beginPath(); if (fwd) { g.moveTo(prev[0], prev[1]); g.lineTo(Q[0], Q[1]); } else { g.moveTo(Q[0], Q[1]); g.lineTo(prev[0], prev[1]); } g.stroke(); } prev = Q; }); }); });
-    S.br.forEach(br => { if (br.kind === 'cpl' || !brClosed(br) || Math.abs(br.Sa.r) < 0.005) return; const a = br.a.grid ? projLL(br.a.ll) : projLL(S.islById[br.a.isl].plant), b = projLL(S.islById[br.b.isl].plant); const off = br.id === 'CV2' ? 0.15 : 0; g.lineDashOffset = -t * (20 + Math.abs(br.Sa.r) * 20); g.strokeStyle = 'rgba(255,240,170,.85)'; g.beginPath(); if (br.Sa.r > 0) { g.moveTo(X(a[0] + off), Y(a[1])); g.lineTo(X(b[0] + off), Y(b[1])); } else { g.moveTo(X(b[0] + off), Y(b[1])); g.lineTo(X(a[0] + off), Y(a[1])); } g.stroke(); });
-    g.restore();
+    /* flussi: puntini che scorrono lungo il tratto (niente linee tratteggiate, lente in Safari) */
+    const r = Math.max(1.5, Math.min(3, v.z / 30)), STEP = 14;
+    const dots = (x0, y0, x1, y1, sp) => {
+      const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy); if (L < 4) return;
+      if (Math.max(x0, x1) < -10 || Math.min(x0, x1) > SLD.w + 10 || Math.max(y0, y1) < -10 || Math.min(y0, y1) > SLD.h + 10) return;
+      const ux = dx / L, uy = dy / L; let d = (t * sp) % STEP;
+      for (; d < L; d += STEP) g.rect(x0 + ux * d - r / 2, y0 + uy * d - r / 2, r, r);
+    };
+    g.fillStyle = 'rgba(220,245,255,.75)'; g.beginPath();
+    S.isl.forEach(I => { if (!I.com) return; const pp = projLL(I.plant); I.feeders.forEach(F => { let prev = [X(pp[0]), Y(pp[1])]; F.nodes.forEach((N, k) => { const q = projLL(N.ll), Q = [X(q[0]), Y(q[1])], sg = F.segs[k]; if (sg.I > 0.5 && N.live) { const sp = 18 + Math.min(60, sg.I / 3); if (N.via === sg) dots(prev[0], prev[1], Q[0], Q[1], sp); else dots(Q[0], Q[1], prev[0], prev[1], sp); } prev = Q; }); }); });
+    g.fill();
+    g.fillStyle = 'rgba(255,240,170,.85)'; g.beginPath();
+    S.br.forEach(br => { if (br.kind === 'cpl' || !brClosed(br) || Math.abs(br.Sa.r) < 0.005) return; const a = br.a.grid ? projLL(br.a.ll) : projLL(S.islById[br.a.isl].plant), b = projLL(S.islById[br.b.isl].plant); const off = br.id === 'CV2' ? 0.15 : 0, sp = 20 + Math.abs(br.Sa.r) * 20; if (br.Sa.r > 0) dots(X(a[0] + off), Y(a[1]), X(b[0] + off), Y(b[1]), sp); else dots(X(b[0] + off), Y(b[1]), X(a[0] + off), Y(a[1]), sp); });
+    g.fill();
   }
   /* interruttori di testa linea e unità di centrale */
   S.isl.forEach(I => {
@@ -280,19 +290,30 @@ function cloudSprite(c) {
 }
 const WDIR = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
 function windName() { return WDIR[Math.round(((S.set.windFrom % 360) + 360) % 360 / 45) % 8]; }
+/* nuvole su un livello a parte, ridisegnato 10 volte al secondo (o subito se la vista cambia) e copiato
+   sulla mappa senza ridimensionamento: si evita di sovrapporre decine di immagini sfumate a ogni fotogramma */
 function drawClouds(g, X, Y, v) {
-  const t = SLD.t;
-  S.clouds.forEach(c => {
-    const R = c.r * v.z, a = c.grow;
-    if (X(c.x) < -R * 2 || X(c.x) > SLD.w + R * 2 || Y(c.y) < -R * 2 || Y(c.y) > SLD.h + R * 2) return;
-    /* ombra a terra */
-    g.save(); g.globalAlpha = 0.28 * c.d * a; g.fillStyle = '#000';
-    g.beginPath(); g.ellipse(X(c.x), Y(c.y), R * 0.95, R * 0.72, 0, 0, 7); g.fill(); g.restore();
-    /* nube (leggermente spostata: è in quota), disegnata da uno sprite pre-calcolato */
-    const ox = X(c.x) - R * 0.12, oy = Y(c.y) - R * 0.25, sp = cloudSprite(c), sc = R / CLOUD_R;
-    g.save(); g.globalAlpha = a; g.drawImage(sp, ox - CLOUD_C * sc, oy - CLOUD_C * sc, sp.width * sc, sp.height * sc); g.restore();
-    if (c.user && v.z > 15) txt(g, Math.round(c.d * 100) + '%', ox, oy - R * 0.6, 'rgba(230,240,255,.8)', '10px ' + FONTM, 'center');
-  });
+  const C = MAP.cl || (MAP.cl = { cv: document.createElement('canvas'), key: '', t: 0 });
+  const key = v.z.toFixed(4) + ',' + v.ox.toFixed(1) + ',' + v.oy.toFixed(1) + ',' + SLD.w + ',' + SLD.h + ',' + SLD.dpr, now = performance.now();
+  if (key !== C.key || now - C.t > 100) {
+    C.key = key; C.t = now;
+    const w = SLD.cv.width, h = SLD.cv.height;
+    if (C.cv.width !== w || C.cv.height !== h) { C.cv.width = w; C.cv.height = h; }
+    const l = C.cv.getContext('2d'); l.setTransform(1, 0, 0, 1, 0, 0); l.clearRect(0, 0, w, h); l.setTransform(SLD.dpr, 0, 0, SLD.dpr, 0, 0);
+    S.clouds.forEach(c => {
+      const R = c.r * v.z, a = c.grow;
+      if (X(c.x) < -R * 2 || X(c.x) > SLD.w + R * 2 || Y(c.y) < -R * 2 || Y(c.y) > SLD.h + R * 2) return;
+      /* ombra a terra */
+      l.globalAlpha = 0.28 * c.d * a; l.fillStyle = '#000';
+      l.beginPath(); l.ellipse(X(c.x), Y(c.y), R * 0.95, R * 0.72, 0, 0, 7); l.fill();
+      /* nube (leggermente spostata: è in quota), disegnata da uno sprite pre-calcolato */
+      const ox = X(c.x) - R * 0.12, oy = Y(c.y) - R * 0.25, sp = cloudSprite(c), sc = R / CLOUD_R;
+      l.globalAlpha = a; l.drawImage(sp, ox - CLOUD_C * sc, oy - CLOUD_C * sc, sp.width * sc, sp.height * sc);
+    });
+    l.globalAlpha = 1;
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0); g.drawImage(C.cv, 0, 0); g.setTransform(SLD.dpr, 0, 0, SLD.dpr, 0, 0);
+  S.clouds.forEach(c => { if (c.user && v.z > 15) { const R = c.r * v.z; txt(g, Math.round(c.d * 100) + '%', X(c.x) - R * 0.12, Y(c.y) - R * 0.85, 'rgba(230,240,255,.8)', '10px ' + FONTM, 'center'); } });
   /* rosa del vento */
   const cx0 = SLD.w - 58, cy0 = 110, [ux, uy] = windVec();
   g.fillStyle = 'rgba(8,13,18,.85)'; g.beginPath(); g.arc(cx0, cy0, 30, 0, 7); g.fill(); g.strokeStyle = '#2c3a46'; g.lineWidth = 1; g.stroke();
