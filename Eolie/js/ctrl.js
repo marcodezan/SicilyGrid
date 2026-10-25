@@ -332,6 +332,8 @@ function emsStep(dt) {
     if (A.grid) {
       /* collegata alla RTN: eventuale gruppo in riserva calda al minimo tecnico */
       const hot = E.hotGrid && E.uc;
+      /* con la rete nazionale l'eccedenza si cede alla RTN: nessuna limitazione automatica del FV */
+      S.isl.filter(x => A.isl.indexOf(x.id) >= 0 && x.pv.curtEms < 1).forEach(x => { x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.1 * dt); });
       if (hot && st.on.length === 0 && !starting.length) startOne(0, 'riserva calda con rete connessa');
       st.on.forEach(g => { if (g.auto && g.mode === 'BASE') { g.Pset += (g.Pn * 0.32 - g.Pset) * Math.min(1, dt / 10); g.Vref = clamp(g.Vref + clamp(0.25 * g.Pe - g.Qe, -0.5, 0.5) / g.Sn * 0.02 * dt, 0.95, 1.08); } });
       if (st.on.length > (hot ? 1 : 0) && E.uc) { const sm = st.on.filter(g => g.auto).sort((a, b) => a.Pn - b.Pn)[0]; if (sm && E.tStart <= 0) { stopGen(sm, 'EMS'); E.tStart = 10; E.last = 'arresto ' + sm.short + ': alimentazione da RTN'; } }

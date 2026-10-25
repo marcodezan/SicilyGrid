@@ -327,15 +327,49 @@ ACT.pvLim = p => { const [id, k] = p.split(':'); const I = byId(id).I; runCmdF((
 ACT.pvSw = p => { const [id, on] = p.split(':'), I = byId(id).I; confirmAsk('pv', on === '1' ? 'Consentire la riconnessione degli inverter FV di ' + I.nm + '?' : 'TELESCATTO di tutti gli inverter FV di ' + I.nm + '?', () => pvSwitch(I, on === '1')); };
 ACT.pvNode = p => { const [id, on] = p.split(':'), N = byId(id); confirmAsk('pv', (on === '1' ? 'Riconnettere' : 'Distaccare') + ' il FV della cabina ' + N.nm + '?', () => pvNode(N, on === '1')); };
 function runCmdF(fn) { const b = S.lastRefuse && S.lastRefuse.t; fn(); if (S.lastRefuse && S.lastRefuse.t !== b) toast('Comando rifiutato: ' + S.lastRefuse.msg); }
+/* comando principale del FV: quanta potenza immettere (limite) e chi decide (EMS o operatore) */
+function pvCtl(I, id) {
+  return `<div class="pvctl"><input type="range" min="0" max="1" step="0.05" data-pk="${I.id}|pv|curt"><b>${DYN(() => fPct(I.pv.curt))}</b></div>` +
+    DYN(() => ({ html: '<p class="note" style="margin:2px 0 6px">Limite ' + fP(I.pv.curt * I.pv.Pav) + ' su ' + fP(I.pv.Pav) + ' disponibili ora · immessi <b>' + fP(I.pv.P) + '</b>' + (!I.pv.man && I.pv.curtEms < 0.999 ? ' · <span class="wa">l’EMS sta limitando a ' + fPct(I.pv.curtEms) + ': passa a Manuale per decidere tu</span>' : '') + '</p>' })) +
+    '<div class="row">' + PVLIM.map(k => BTN(Math.round(k * 100) + '%', 'pvLim', id + ':' + k, 'sm', () => ({ on: Math.abs(I.pv.curt - k) < 0.01 }))).join('') + '</div>' +
+    ROW(BTN('Automatica (EMS)', 'pvMan', id + ':0', 'sm', () => ({ on: !I.pv.man })), BTN('Manuale (decidi tu)', 'pvMan', id + ':1', 'sm', () => ({ on: !!I.pv.man }))) +
+    DYN(() => ({ html: I.pv.man ? '<p class="note">Manuale: l’automazione non riduce il FV, vale solo il tuo limite. Se i diesel scendono sotto il minimo tecnico, o il FV supera il carico senza un accumulo o la rete nazionale ad assorbirlo, la frequenza sale e gli inverter possono distaccarsi.</p>' : '<p class="note">Automatica: oltre al tuo limite, l’EMS può ridurre il FV per tenere i diesel sopra il minimo tecnico o quando gli accumuli sono pieni.</p>' }));
+}
+/* finestra «Fotovoltaico in rete»: limite di immissione e gestione di tutte le isole */
+function pvModal() {
+  const rows = S.isl.map(I => `<tr><td><b>${esc(I.nm)}</b><br><small class="note">${(I.pv.kwp / 1000).toFixed(2)} MWp</small></td>
+    <td class="n"><span data-pvm="${I.id}|av"></span></td><td class="n"><b data-pvm="${I.id}|p"></b></td>
+    <td><div class="pvctl"><input type="range" min="0" max="1" step="0.05" data-pk="${I.id}|pv|curt"><b data-pvm="${I.id}|c"></b></div></td>
+    <td class="row"><button class="btn sm" data-a="pvMan2" data-p="${I.id}:0" data-pvm="${I.id}|a">Auto</button><button class="btn sm" data-a="pvMan2" data-p="${I.id}:1" data-pvm="${I.id}|m">Manuale</button></td>
+    <td><small data-pvm="${I.id}|w"></small></td></tr>`).join('');
+  modal('Fotovoltaico in rete', `<p class="note">Decidi quanta potenza FV ogni isola immette in rete: il cursore è il limite in percentuale della potenza disponibile col sole di questo momento. In <b>Automatica</b> l’EMS può ridurla ancora (diesel al minimo tecnico, accumuli pieni); in <b>Manuale</b> vale solo il tuo limite.</p>
+    <table class="dt pvm"><tr style="color:var(--dim)"><td>isola</td><td class="n">disponibile</td><td class="n">immessa</td><td>limite di immissione</td><td>gestione</td><td></td></tr>${rows}</table>
+    <div class="row" style="margin-top:8px"><span class="note">Tutte le isole:</span>${[1, 0.75, 0.5, 0.25, 0].map(k => `<button class="btn sm" data-a="pvAll" data-p="${k}">${Math.round(k * 100)}%</button>`).join('')}<button class="btn sm" data-a="pvAllMan" data-p="0">tutte in automatica</button><button class="btn sm" data-a="pvAllMan" data-p="1">tutte in manuale</button></div>`);
+  pvModalUpd(true);
+  clearInterval(UI.pvmT); UI.pvmT = setInterval(() => { if (!document.querySelector('#mBody .pvm')) { clearInterval(UI.pvmT); return; } pvModalUpd(); }, 400);
+}
+function pvModalUpd(init) {
+  document.querySelectorAll('#mBody input[data-pk]').forEach(n => { if (init || document.activeElement !== n) n.value = getPK(n.dataset.pk); });
+  document.querySelectorAll('#mBody [data-pvm]').forEach(n => {
+    const [id, f] = n.dataset.pvm.split('|'), I = S.islById[id], P = I.pv;
+    if (f === 'av') n.textContent = fP(P.Pav);
+    else if (f === 'p') n.textContent = fP(P.P);
+    else if (f === 'c') n.textContent = fPct(P.curt);
+    else if (f === 'a') n.classList.toggle('on', !P.man);
+    else if (f === 'm') n.classList.toggle('on', !!P.man);
+    else if (f === 'w') { const t = !P.man && P.curtEms < 0.999 ? 'EMS: −' + fPct(1 - P.curtEms) : P.opOff ? 'inverter distaccati' : ''; if (n.textContent !== t) { n.textContent = t; n.className = t ? 'wa' : ''; } }
+  });
+}
+ACT.pvPanel = () => { $('menuBox').classList.add('hidden'); pvModal(); };
+ACT.pvMan2 = p => { ACT.pvMan(S.islById[p.split(':')[0]].pvEl.id + ':' + p.split(':')[1]); pvModalUpd(); };
+ACT.pvAll = p => { S.isl.forEach(I => pvLimit(I, +p)); pvModalUpd(true); };
+ACT.pvAllMan = p => { S.isl.forEach(I => ACT.pvMan(I.pvEl.id + ':' + p)); pvModalUpd(); };
 FACE.pv = {
   cmd: (P) => { const I = P.I;
-    return SEC('Produzione', KV(K('Potenza immessa', () => fP(I.pv.P)), K('Potenza disponibile (sole)', () => fP(I.pv.Pav)), K('Irraggiamento', () => I.pv.irr.toFixed(0) + ' W/m²'), K('Potenza installata', () => (I.pv.kwp / 1000).toFixed(2) + ' MWp su ' + I.nodes.filter(N => N.pv > 0).length + ' cabine'), K('Limite operatore', () => fPct(I.pv.curt)), K('Limitazione automatica (EMS)', () => I.pv.curtEms < 0.999 ? ['−' + fPct(1 - I.pv.curtEms), 'wa'] : 'nessuna'))) +
+    return SEC('Potenza FV da immettere in rete', pvCtl(I, P.id)) +
+      SEC('Produzione', KV(K('Potenza immessa', () => fP(I.pv.P)), K('Potenza disponibile (sole)', () => fP(I.pv.Pav)), K('Irraggiamento', () => I.pv.irr.toFixed(0) + ' W/m²'), K('Potenza installata', () => (I.pv.kwp / 1000).toFixed(2) + ' MWp su ' + I.nodes.filter(N => N.pv > 0).length + ' cabine'), K('Limite operatore', () => fPct(I.pv.curt)), K('Limitazione automatica (EMS)', () => I.pv.curtEms < 0.999 ? ['−' + fPct(1 - I.pv.curtEms), 'wa'] : 'nessuna'))) +
       SEC('Perché non eroga tutto', DYN(() => { const L = pvWhy(I), lost = L.reduce((a, x) => a + x.kw, 0); return { html: (lost < 0.003 && L.every(x => x.kw > 0) ? '<p class="note" style="color:#9fdcb5">Il FV eroga tutta la potenza disponibile.</p>' : '') + L.map(x => `<div class="kv"><span>${esc(x.t)}</span><b class="${x.kw > 0 ? 'wa' : ''}">${x.kw > 0 ? '−' + fP(x.kw) : ''}</b></div>`).join('') }; }) +
         ROW(BTN('Riconnetti ora gli inverter', 'pvNow', P.id, 'go', () => ({ dis: !I.pv.groups.some(g => g.frac > 0 && !g.on) && !I.pv.opOff })))) +
-      SEC('Gestione del fotovoltaico', ROW(BTN('Automatica (EMS)', 'pvMan', P.id + ':0', 'sm', () => ({ on: !I.pv.man })), BTN('Manuale', 'pvMan', P.id + ':1', 'sm', () => ({ on: !!I.pv.man }))) +
-        `<div class="pset" style="margin-top:6px"><label>Potenza immessa massima</label><span><input type="range" min="0" max="1" step="0.05" data-pk="${P.isl}|pv|curt" style="width:130px"> ${DYN(() => fPct(I.pv.curt))}</span></div>` +
-        '<div class="row">' + PVLIM.map(k => BTN(Math.round(k * 100) + '%', 'pvLim', P.id + ':' + k, 'sm', () => ({ on: Math.abs(I.pv.curt - k) < 0.01 }))).join('') + '</div>' +
-        DYN(() => ({ html: I.pv.man ? '<p class="note">Gestione manuale: l\'automazione non limita più il FV. Attenzione: se i diesel scendono sotto il minimo tecnico, o il FV supera il carico, la frequenza sale e gli inverter possono distaccarsi.</p>' : '<p class="note">In automatico l\'EMS può ridurre il FV quando i diesel scendono sotto il minimo tecnico. Il limite impostato qui vale in ogni caso.</p>' }))) +
       SEC('Inverter', I.pv.groups.filter(g => g.frac > 0).map(g => `<div class="kv"><span>${esc(g.nm)} · ${fPct(g.frac)}</span><b data-k="${FG.push(() => g.on ? (g.ramp < 1 ? ['in rientro ' + fPct(g.ramp), 'wa'] : ['connessi', 'ok']) : ['distaccati: ' + g.why, 'al']) - 1}"></b></div>`).join('') +
         ROW(BTN('Telescatto inverter', 'pvSw', P.id + ':0', 'dg', () => ({ dis: I.pv.opOff })), BTN('Consenti riconnessione', 'pvSw', P.id + ':1', 'go', () => ({ dis: !I.pv.opOff }))) +
         '<p class="note">In automatico gli inverter si distaccano da soli se frequenza o tensione escono dalle soglie e rientrano dopo 20 s di rete regolare, in rampa. Quelli con tarature storiche (49,7–50,3 Hz) sono i più sensibili.</p>');

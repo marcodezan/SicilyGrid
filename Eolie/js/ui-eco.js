@@ -64,6 +64,7 @@ function buildEco() {
     <div class="eacts">
       <button class="btn hi" data-a="ecoBuild">${ICO('build')} Cantiere</button>
       <button class="btn" data-a="ecoFunds">${ICO('euro')} Fondi</button>
+      <button class="btn" data-a="pvPanel">${ICO('sun')} Fotovoltaico</button>
       <button class="btn" data-a="ecoPlan">${ICO('battery')} Piano accumuli</button>
       <button class="btn" data-a="ecoEms">${ICO('gear')} Strategia di esercizio</button>
       <button class="btn" data-a="ecoDays">${ICO('list')} Giornate</button>
