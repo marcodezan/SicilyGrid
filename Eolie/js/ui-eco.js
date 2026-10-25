@@ -8,7 +8,7 @@ let EG = [], EGM = [], EGT = EG;
 const E_ = fn => { const i = EGT.length; EGT.push(fn); return `<span data-e="${i}"></span>`; };
 const ECV = (fn, h) => { const i = EGT.length; EGT.push(fn); return `<canvas data-ec="${i}" style="height:${h}px"></canvas>`; };
 const eurK = v => (v < 0 ? '−' : '') + '€ ' + (Math.abs(v) >= 10000 ? (Math.abs(v) / 1000).toFixed(0) + 'k' : Math.round(Math.abs(v)).toLocaleString('it-IT'));
-const ecoMargin = () => { const R = ECO.rate || {}; return (R.ric || 0) - (R.gas || 0) - (R.om || 0) - (R.bess || 0) - (R.imp || 0) - (R.pen || 0); };
+const ecoMargin = () => { const R = ECO.rate || {}; return (R.ric || 0) + (R.exp || 0) - (R.gas || 0) - (R.om || 0) - (R.bess || 0) - (R.imp || 0) - (R.pen || 0); };
 const dayNet = ledNet;
 function updE(root, arr) {
   if (!root) return;
@@ -76,6 +76,7 @@ function buildEco() {
     tile('Margine oggi', () => { const n = dayNet(D()); return [eur(n), n >= 0 ? 'ok' : 'al']; }, () => 'investimenti oggi ' + eur(D().inv)) +
     tile('Quota rinnovabile', () => (D().pv / Math.max(1e-6, D().pv + D().dsl) * 100).toFixed(1) + ' %', () => 'oggi · ora ' + (S.tot.now ? (S.tot.now.pv / Math.max(1e-6, S.tot.now.pv + S.tot.now.dsl) * 100).toFixed(0) : 0) + ' %') +
     tile('Qualità del servizio', () => (D().qn > 0 ? D().q / D().qn * 100 : 100).toFixed(1) + ' %', () => 'ora ' + (S.isl.reduce((a, I) => a + (I.q === undefined ? 1 : I.q), 0) / S.isl.length * 100).toFixed(0) + ' %') +
+    tile('Scambio con la Sicilia', () => { const g = rtnFlow(); return g === null ? ['non collegata', ''] : g < -0.001 ? ['vendi ' + fP(-g), 'ok'] : g > 0.001 ? ['compri ' + fP(g), 'wa'] : ['in equilibrio', '']; }, () => 'oggi venduti ' + Math.round(D().kwhExp || 0).toLocaleString('it-IT') + ' kWh · ' + eur(D().exp || 0)) +
     tile('Energia non fornita', () => [Math.round(D().ens) + ' kWh', D().ens > 1 ? 'al' : ''], () => 'penale ' + PRICE.ens.toFixed(2) + ' €/kWh') +
     `</div>
   <div class="panelgrid">
@@ -87,6 +88,7 @@ function buildEco() {
     <div class="dbox"><h5>Consigli</h5>${E_(() => ({ html: ecoTips().map(t => `<div class="tip">${esc(t)}</div>`).join('') || '<p class="note">Tutto in ordine: il servizio è regolare e il parco è sfruttato bene.</p>' }))}</div>
     <div class="dbox"><h5>Come si guadagna</h5><ul class="elist">
       <li><b>Ricavi</b>: ${PRICE.tariff.toFixed(2)} €/kWh fornito, ridotti se la frequenza esce da ±0,2 Hz (−15%) o da ±0,5 Hz (−40%), se la tensione di sbarra esce da ±8% (−10%) o se la cabina è a bassa tensione.</li>
+      <li><b>Rete nazionale</b>: con il collegamento 150 kV chiuso compri dalla Sicilia a ${PRICE.imp.toFixed(2)} €/kWh e le vendi l'eccedenza (per esempio il FV di mezzogiorno) a ${PRICE.exp.toFixed(2)} €/kWh.</li>
       <li><b>Gasolio</b>: ${PRICE.fuel.toFixed(2)} €/l. Un gruppo poco carico consuma di più per ogni kWh: meglio pochi gruppi ben caricati, senza rinunciare alla riserva.</li>
       <li><b>Manutenzione</b>: ${PRICE.omDsl} €/MWh dai diesel e ${PRICE.start} € per avviamento; accumuli ${PRICE.bessWear} €/MWh scambiato; squadra ${PRICE.crew} € a intervento.</li>
       <li><b>Penale</b>: ${PRICE.ens.toFixed(2)} €/kWh di energia non fornita, oltre al mancato incasso. Sotto ${eur(ECO_BANKRUPT)} di cassa la gestione fallisce.</li>
@@ -97,6 +99,8 @@ function buildEco() {
   updE($('eco'), EG);
 }
 function updEco() { if (ECO.on && UI.ctab === 'eco') updE($('eco'), EG); }
+/* potenza scambiata con la RTN (MW, > 0 import), null se il collegamento non è in servizio */
+function rtnFlow() { return S.grid.bus.area && S.grid.bus.area.isl.length ? (S.grid.P || 0) : null; }
 function islTable() {
   const ld = I => { const on = I.gens.filter(G => G.st === 'IN PARALLELO'); return [on.length, on.length ? on.reduce((a, G) => a + G.Pe, 0) / on.reduce((a, G) => a + G.Pn, 0) : 0]; };
   return '<table class="dt"><tr style="color:var(--dim)"><td>isola</td><td>qualità</td><td class="n">ricavi €/h</td><td class="n">gasolio €/h</td><td class="n">FV ora</td><td>diesel</td><td>accumulo</td><td></td></tr>' + S.isl.map(I =>
@@ -182,7 +186,7 @@ function ecoBuildModal() {
     h += `<p class="note">Un cavo sottomarino a 20 kV (5,5 MVA) collega le sbarre di due isole: chiuso il primo interruttore, il secondo si chiude con il sincronizzatore. Isole collegate condividono riserva e surplus FV, e servono meno gruppi in servizio. Lavori: ${BUILD.cableH} h.</p>
       <div class="sec"><h5><span>Nuovo cavo</span></h5><div class="bd"><div class="row">da <select id="cabA">${S.isl.map(I => `<option value="${I.id}" ${I.id === a ? 'selected' : ''}>${esc(I.nm)}</option>`).join('')}</select> a <select id="cabB">${S.isl.map(I => `<option value="${I.id}" ${I.id === b ? 'selected' : ''}>${esc(I.nm)}</option>`).join('')}</select> <span id="cabQ"></span></div></div></div>
       <div class="sec"><h5><span>Collegamenti esistenti</span></h5><div class="bd"><table class="dt">${S.br.filter(x => x.kind !== 'cpl').map(x => `<tr data-a="goEl" data-p="${x.id}"><td>${esc(x.nm)}</td><td class="n">${(x.km || 0).toFixed(1)} km</td><td>${E_(() => x.notBuilt ? ['DA COSTRUIRE', 'wa'] : brClosed(x) ? ['in servizio · ' + fP(Math.abs(x.Sa.r)), 'ok'] : ['aperto', ''])}</td></tr>`).join('')}</table></div></div>` +
-      (S.byId.CRT ? `<div class="sec"><h5><span>Collegamento con la Sicilia (150 kV)</span></h5><div class="bd"><p class="note">Porta a Lipari (e alle isole collegate) l'energia della rete nazionale a ${PRICE.imp.toFixed(2)} €/kWh, molto meno del gasolio. Lavori: ${BUILD.rtnH} h di orologio.</p><div class="row">${S.byId.CRT.notBuilt ? buyBtn({ k: 'rtn' }, 'Realizza il collegamento') : '<b class="ok">realizzato</b>'}</div></div></div>` : '');
+      (S.byId.CRT ? `<div class="sec"><h5><span>Collegamento con la Sicilia (150 kV)</span></h5><div class="bd"><p class="note">Porta a Lipari (e alle isole collegate) l'energia della rete nazionale a ${PRICE.imp.toFixed(2)} €/kWh, molto meno del gasolio, e ti permette di vendere l'eccedenza (per esempio il FV di mezzogiorno) a ${PRICE.exp.toFixed(2)} €/kWh invece di limitarla. Lavori: ${BUILD.rtnH} h di orologio.</p><div class="row">${S.byId.CRT.notBuilt ? buyBtn({ k: 'rtn' }, 'Realizza il collegamento') : '<b class="ok">realizzato</b>'}</div></div></div>` : '');
   }
   h += '</div>';
   modal('Cantiere', h);
@@ -359,7 +363,7 @@ ACT.ecoEms = () => {
 ACT.ecoDays = () => {
   const L = ECO.days.slice().reverse();
   modal('Giornate di gestione', L.length ? '<table class="dt"><tr style="color:var(--dim)"><td>giorno</td><td class="n">ricavi</td><td class="n">gasolio</td><td class="n">altri costi</td><td class="n">investimenti</td><td class="n">margine</td><td class="n">rinnovabile</td><td class="n">qualità</td><td class="n">non fornita</td></tr>' +
-    L.map(d => `<tr><td>${dateStr(d.doy)}</td><td class="n">${eur(d.ric)}</td><td class="n">${eur(d.gas)}</td><td class="n">${eur(d.om + d.bess + d.sq + d.imp + d.pen + (d.int || 0) - (d.con || 0))}</td><td class="n">${eur(d.inv)}</td><td class="n ${d.net >= 0 ? 'ok' : 'al'}"><b>${eur(d.net)}</b></td><td class="n">${(d.re * 100).toFixed(0)}%</td><td class="n">${(d.qm * 100).toFixed(1)}%</td><td class="n">${Math.round(d.ens)} kWh</td></tr>`).join('') + '</table>' : '<p class="note">Nessuna giornata ancora chiusa: il riepilogo compare a mezzanotte (orologio della simulazione). Puoi accelerare il tempo con i pulsanti 60× e 120× in alto.</p>');
+    L.map(d => `<tr><td>${dateStr(d.doy)}</td><td class="n">${eur(d.ric + (d.exp || 0))}</td><td class="n">${eur(d.gas)}</td><td class="n">${eur(d.om + d.bess + d.sq + d.imp + d.pen + (d.int || 0) - (d.con || 0))}</td><td class="n">${eur(d.inv)}</td><td class="n ${d.net >= 0 ? 'ok' : 'al'}"><b>${eur(d.net)}</b></td><td class="n">${(d.re * 100).toFixed(0)}%</td><td class="n">${(d.qm * 100).toFixed(1)}%</td><td class="n">${Math.round(d.ens)} kWh</td></tr>`).join('') + '</table>' : '<p class="note">Nessuna giornata ancora chiusa: il riepilogo compare a mezzanotte (orologio della simulazione). Puoi accelerare il tempo con i pulsanti 60× e 120× in alto.</p>');
   UI.ecoModal = null;
 };
 

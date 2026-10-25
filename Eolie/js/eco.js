@@ -20,6 +20,7 @@ const PRICE = {
   bessWear: 15,   /* €/MWh scambiato dagli accumuli (degrado delle celle) */
   ens: 1.5,       /* €/kWh di energia non fornita (penale dell'Autorità) */
   imp: 0.14,      /* €/kWh acquistato dalla rete siciliana */
+  exp: 0.10,      /* €/kWh ceduto alla rete siciliana (ritiro dell'eccedenza) */
   crew: 800       /* € per ogni intervento di una squadra */
 };
 const BUILD = {
@@ -30,11 +31,11 @@ const BUILD = {
   rtn: 400000,    rtnH: 36
 };
 const ECO_START_CASH = 60000, ECO_BANKRUPT = -30000;
-const LED_KEYS = ['ric', 'con', 'gas', 'om', 'bess', 'sq', 'imp', 'pen', 'int', 'inv', 'ven'];
-const LED_NM = { ric: 'Ricavi dal servizio', con: 'Contributi pubblici', gas: 'Gasolio', om: 'Manutenzione diesel', bess: 'Degrado accumuli', sq: 'Squadre di intervento', imp: 'Energia dalla Sicilia', pen: 'Penali energia non fornita', int: 'Interessi e commissioni', inv: 'Investimenti', ven: 'Dismissioni (recupero)' };
-const LED_POS = { ric: 1, con: 1, ven: 1 };
+const LED_KEYS = ['ric', 'exp', 'con', 'gas', 'om', 'bess', 'sq', 'imp', 'pen', 'int', 'inv', 'ven'];
+const LED_NM = { ric: 'Ricavi dal servizio', exp: 'Vendita alla rete nazionale', con: 'Contributi pubblici', gas: 'Gasolio', om: 'Manutenzione diesel', bess: 'Degrado accumuli', sq: 'Squadre di intervento', imp: 'Energia dalla Sicilia', pen: 'Penali energia non fornita', int: 'Interessi e commissioni', inv: 'Investimenti', ven: 'Dismissioni (recupero)' };
+const LED_POS = { ric: 1, exp: 1, con: 1, ven: 1 };
 /* risultato della giornata (esclusi gli investimenti) */
-const ledNet = d => d.ric + d.ven + (d.con || 0) - d.gas - d.om - d.bess - d.sq - d.imp - d.pen - (d.int || 0);
+const ledNet = d => d.ric + (d.exp || 0) + d.ven + (d.con || 0) - d.gas - d.om - d.bess - d.sq - d.imp - d.pen - (d.int || 0);
 const ledZero = () => { const o = {}; LED_KEYS.forEach(k => { o[k] = 0; }); o.kwh = 0; o.ens = 0; o.fuelL = 0; o.pv = 0; o.dsl = 0; o.q = 0; o.qn = 0; return o; };
 
 /* configurazione scelta dall'utente (rete e modalità), letta prima dell'avvio */
@@ -85,19 +86,21 @@ function ecoStep(dt) {
     pv += I.pv.P;
   });
   R.pen = ens * PRICE.ens;
-  const imp = S.grid.bus.area && S.grid.bus.area.isl.length ? Math.max(0, S.grid.P || 0) : 0;
-  R.imp = imp * 1000 * PRICE.imp;
+  /* scambio con la RTN: S.grid.P > 0 import dalla Sicilia, < 0 cessione dell'eccedenza */
+  const gP = S.grid.bus.area && S.grid.bus.area.isl.length ? (S.grid.P || 0) : 0;
+  R.imp = Math.max(0, gP) * 1000 * PRICE.imp;
+  R.exp = Math.max(0, -gP) * 1000 * PRICE.exp;
   ECO.rate = R;
   /* importi una tantum: avviamenti e squadre */
   let once = 0;
   S.gens.forEach(G => { const n = G.starts || 0, o = ECO.starts[G.id] || 0; if (n > o) { once += (n - o) * PRICE.start; ECO.starts[G.id] = n; } });
   const cr = (S.crewN || 0) - ECO.crewN0; ECO.crewN0 = S.crewN || 0;
   const add = (k, v) => { ECO.led[k] += v; ECO.day[k] += v; };
-  add('ric', R.ric * h); add('gas', R.gas * h); add('om', R.om * h + once); add('bess', R.bess * h); add('imp', R.imp * h); add('pen', R.pen * h);
+  add('ric', R.ric * h); add('exp', R.exp * h); add('gas', R.gas * h); add('om', R.om * h + once); add('bess', R.bess * h); add('imp', R.imp * h); add('pen', R.pen * h);
   if (cr > 0) add('sq', cr * PRICE.crew);
   const qAvg = S.isl.reduce((a, I) => a + (I.q || 0), 0) / S.isl.length;
-  [ECO.led, ECO.day].forEach(L => { L.kwh += kw * h; L.ens += ens * h; L.fuelL += fuelLh * h; L.pv += pv * h; L.dsl += dsl * h; L.q += qAvg * h; L.qn += h; });
-  ECO.cash += (R.ric - R.gas - R.om - R.bess - R.imp - R.pen) * h - once - (cr > 0 ? cr * PRICE.crew : 0);
+  [ECO.led, ECO.day].forEach(L => { L.kwhExp = (L.kwhExp || 0) + Math.max(0, -gP) * 1000 * h; L.kwh += kw * h; L.ens += ens * h; L.fuelL += fuelLh * h; L.pv += pv * h; L.dsl += dsl * h; L.q += qAvg * h; L.qn += h; });
+  ECO.cash += (R.ric + R.exp - R.gas - R.om - R.bess - R.imp - R.pen) * h - once - (cr > 0 ? cr * PRICE.crew : 0);
   /* andamento della cassa (un punto ogni 15 minuti di orologio) */
   ECO.hAcc = (ECO.hAcc || 0) + h;
   if (ECO.hAcc >= 0.25) { ECO.hAcc = 0; ECO.hist.push([S.tc || 0, ECO.cash]); if (ECO.hist.length > 400) ECO.hist.shift(); }
