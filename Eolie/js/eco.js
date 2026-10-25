@@ -30,8 +30,11 @@ const BUILD = {
   rtn: 400000,    rtnH: 36
 };
 const ECO_START_CASH = 60000, ECO_BANKRUPT = -30000;
-const LED_KEYS = ['ric', 'gas', 'om', 'bess', 'sq', 'imp', 'pen', 'inv', 'ven'];
-const LED_NM = { ric: 'Ricavi dal servizio', gas: 'Gasolio', om: 'Manutenzione diesel', bess: 'Degrado accumuli', sq: 'Squadre di intervento', imp: 'Energia dalla Sicilia', pen: 'Penali energia non fornita', inv: 'Investimenti', ven: 'Dismissioni (recupero)' };
+const LED_KEYS = ['ric', 'con', 'gas', 'om', 'bess', 'sq', 'imp', 'pen', 'int', 'inv', 'ven'];
+const LED_NM = { ric: 'Ricavi dal servizio', con: 'Contributi pubblici', gas: 'Gasolio', om: 'Manutenzione diesel', bess: 'Degrado accumuli', sq: 'Squadre di intervento', imp: 'Energia dalla Sicilia', pen: 'Penali energia non fornita', int: 'Interessi e commissioni', inv: 'Investimenti', ven: 'Dismissioni (recupero)' };
+const LED_POS = { ric: 1, con: 1, ven: 1 };
+/* risultato della giornata (esclusi gli investimenti) */
+const ledNet = d => d.ric + d.ven + (d.con || 0) - d.gas - d.om - d.bess - d.sq - d.imp - d.pen - (d.int || 0);
 const ledZero = () => { const o = {}; LED_KEYS.forEach(k => { o[k] = 0; }); o.kwh = 0; o.ens = 0; o.fuelL = 0; o.pv = 0; o.dsl = 0; o.q = 0; o.qn = 0; return o; };
 
 /* configurazione scelta dall'utente (rete e modalità), letta prima dell'avvio */
@@ -43,7 +46,7 @@ const ledZero = () => { const o = {}; LED_KEYS.forEach(k => { o[k] = 0; }); o.kw
 })();
 
 function ecoStart(save) {
-  Object.assign(ECO, { on: true, cash: ECO_START_CASH, led: ledZero(), day: ledZero(), days: [], proj: [], done: [], plan: {}, rate: ledZero(), hist: [], over: false, pN: 0, crewN0: S.crewN || 0, starts: {}, doy: S.doy, tc0: S.tc || 0 });
+  Object.assign(ECO, { on: true, cash: ECO_START_CASH, led: ledZero(), day: ledZero(), days: [], proj: [], done: [], plan: {}, rate: ledZero(), hist: [], over: false, pN: 0, crewN0: S.crewN || 0, starts: {}, doy: S.doy, tc0: S.tc || 0, fin: finInit() });
   S.gens.forEach(G => { ECO.starts[G.id] = G.starts || 0; });
   if (S.byId.CRT) S.byId.CRT.notBuilt = true;
   S.set.randF = 1;
@@ -100,12 +103,17 @@ function ecoStep(dt) {
   if (ECO.hAcc >= 0.25) { ECO.hAcc = 0; ECO.hist.push([S.tc || 0, ECO.cash]); if (ECO.hist.length > 400) ECO.hist.shift(); }
   /* chiusura della giornata */
   if (S.doy !== ECO.doy) { ecoCloseDay(); ECO.doy = S.doy; }
+  /* anticipo di emergenza: si restituisce trattenendo una quota dei ricavi */
+  const F = ECO.fin;
+  if (F.adv && R.ric > 0) { const k = Math.min(F.adv.bal, R.ric * h * FIN.advKeep); F.adv.bal -= k; ECO.cash -= k; if (F.adv.bal < 0.5) { F.adv = null; soe(null, 'FONDI: anticipo di emergenza interamente restituito', 1); } }
   ecoPlans(dt);
   ecoProjects();
+  finStep();
   if (ECO.cash < ECO_BANKRUPT && !ECO.over) { ECO.over = true; soe(null, 'GESTIONE: FALLIMENTO — la cassa è scesa sotto ' + eur(ECO_BANKRUPT), 3); }
 }
 function ecoCloseDay() {
-  const d = ECO.day, net = d.ric + d.ven - d.gas - d.om - d.bess - d.sq - d.imp - d.pen;
+  finDaily();
+  const d = ECO.day, net = ledNet(d);
   const rec = Object.assign({}, d, { doy: ECO.doy, net, utile: net - d.inv, re: d.pv / Math.max(1e-6, d.pv + d.dsl), qm: d.qn > 0 ? d.q / d.qn : 0 });
   ECO.days.push(rec); if (ECO.days.length > 60) ECO.days.shift();
   ECO.day = ledZero();
@@ -158,7 +166,7 @@ const fmtMW = mw => mw < 1 ? Math.round(mw * 1000) + ' kW' : mw.toFixed(mw % 1 ?
 function ecoCheck(sp) {
   if (ECO.over) return 'gestione fallita';
   const q = ecoQuote(sp); if (!q) return 'opera sconosciuta';
-  if (ECO.cash < q.cost) return 'fondi insufficienti (servono ' + eur(q.cost) + ')';
+  if (ECO.cash < q.cost) return 'fondi insufficienti (servono ' + eur(q.cost) + '): puoi chiederli da «Fondi»';
   if (ECO.proj.length >= 6) return 'troppi cantieri aperti contemporaneamente (massimo 6)';
   if (sp.k === 'dslUp') { const G = S.byId[sp.id]; if (!G || G.st !== 'FERMO' || devClosed(G.brk)) return 'il gruppo deve essere fermo e separato dalla rete'; if (sp.Pn <= G.Pn) return 'la nuova potenza deve essere maggiore'; }
   if (sp.k === 'cable') {
@@ -176,6 +184,8 @@ function ecoBuy(sp) {
   ECO.cash -= q.cost; ECO.led.inv += q.cost; ECO.day.inv += q.cost;
   const p = { id: ++ECO.pN, sp, label: q.label, cost: q.cost, t0: S.tc || 0, tEnd: (S.tc || 0) + q.h * 3600 };
   ECO.proj.push(p);
+  const GR = ECO.fin.grant;
+  if (GR && GR.vinc > 0 && GREEN.indexOf(sp.k) >= 0) { GR.vinc = Math.max(0, GR.vinc - q.cost); if (GR.vinc <= 0) soe(null, 'FONDI: contributo pubblico interamente impiegato in opere per la transizione', 1); }
   if (sp.k === 'dslUp') { const G = S.byId[sp.id]; G.blocked = true; G.lastTrip = 'cantiere: potenziamento in corso'; }
   soe(sp.isl || null, 'CANTIERE avviato: ' + q.label + ' · ' + eur(q.cost) + ' · fine lavori tra ' + q.h + ' h di orologio', 2);
   return '';
@@ -218,6 +228,136 @@ function ecoScrap(G) {
   if (typeof sldInvalidate === 'function') sldInvalidate();
   return '';
 }
+
+/* ---------------- fondi: prestiti bancari, contributi pubblici, anticipo di emergenza ----------------
+   Valori di gioco: il tempo è compresso (una giornata simulata dura pochi minuti),
+   quindi interessi e scadenze sono espressi per giornata simulata. */
+const FIN = {
+  loanAmts: [25000, 50000, 100000, 200000], loanDays: [3, 7, 15],
+  rate: { A: 0.003, B: 0.005, C: 0.009 },  /* interesse per giornata sul debito residuo */
+  mult: { A: 8, B: 5, C: 3 },              /* fido: multipli del risultato giornaliero medio */
+  fee: 0.01, payoff: 0.01, bankH: 1, maxLoans: 3,
+  grantAmts: [50000, 100000, 200000], grantH: 12, grantDays: 3, grantCool: 2, grantQ: [0.97, 0.9],
+  advAmt: 40000, advFee: 0.02, advKeep: 0.25, advCash: 10000
+};
+const GREEN = ['pv', 'bess', 'bessX', 'cable', 'rtn'];
+function finInit() { return { loans: [], req: [], grant: null, adv: null, nextGrant: 0, n: 0 }; }
+/* risultato giornaliero medio degli ultimi 3 giorni, senza contributi (stima prudente se non ci sono bilanci) */
+function finMargin() { const D = ECO.days.slice(-3); return D.length ? D.reduce((a, d) => a + ledNet(d) - (d.con || 0), 0) / D.length : 12000; }
+function finQuality() { const d = ECO.day; if (d.qn > 0.5) return d.q / d.qn; const L = ECO.days[ECO.days.length - 1]; return L ? L.qm : 1; }
+function finDebt() { const F = ECO.fin; return F.loans.reduce((a, l) => a + l.bal, 0) + (F.adv ? F.adv.bal : 0); }
+function finRating() {
+  const q = finQuality(), m = finMargin(), debt = finDebt();
+  const pq = clamp((q - 0.95) * 500, -25, 25), pm = clamp(m / 1000, -25, 25), pd = clamp(debt / 20000, 0, 30), pc = ECO.cash < 0 ? 10 : 0;
+  const sc = Math.round(clamp(40 + pq + pm - pd - pc, 0, 100));
+  const g = sc >= 70 ? 'A' : sc >= 50 ? 'B' : sc >= 35 ? 'C' : 'D';
+  const lim = g === 'D' ? 0 : Math.max(0, Math.round(Math.max(30000, FIN.mult[g] * m) / 1000) * 1000 - debt);
+  return { sc, g, q, m, debt, lim, rate: FIN.rate[g] || 0, pq, pm, pd, pc };
+}
+function loanQuote(amt, days) {
+  const R = finRating(), r = R.rate * (1 + (days - 3) * 0.03); /* durata più lunga, tasso un po' più alto */
+  return { amt, days, r, R, fee: Math.round(amt * FIN.fee), int: Math.round(amt * r * (days + 1) / 2), first: Math.round(amt / days + amt * r) };
+}
+function loanCheck(amt, days) {
+  if (!ECO.on || ECO.over) return 'gestione non attiva';
+  const R = finRating(), F = ECO.fin;
+  if (FIN.loanDays.indexOf(days) < 0 || !(amt > 0)) return 'importo o durata non validi';
+  if (R.g === 'D') return 'la banca rifiuta: merito di credito insufficiente (' + R.sc + '/100)';
+  if (F.req.some(x => x.k === 'loan')) return 'c\'è già una richiesta di prestito in istruttoria';
+  if (F.loans.length >= FIN.maxLoans) return 'massimo ' + FIN.maxLoans + ' prestiti contemporanei';
+  if (amt > R.lim) return 'oltre il fido disponibile (' + eur(R.lim) + ')';
+  return '';
+}
+function loanAsk(amt, days) {
+  const why = loanCheck(amt, days); if (why) return why;
+  const q = loanQuote(amt, days), now = S.tc || 0;
+  ECO.fin.req.push({ id: ++ECO.fin.n, k: 'loan', amt, days, r: q.r, fee: q.fee, t0: now, tReady: now + FIN.bankH * 3600 });
+  soe(null, 'FONDI: richiesta di prestito di ' + eur(amt) + ' in ' + days + ' rate giornaliere (merito ' + q.R.g + ', interesse ' + (q.r * 100).toFixed(2) + '% al giorno): risposta tra ' + FIN.bankH + ' h', 2);
+  return '';
+}
+function loanPayoff(id) {
+  const F = ECO.fin, l = F.loans.find(x => x.id === id); if (!l) return 'prestito inesistente';
+  const pen = Math.round(l.bal * FIN.payoff), tot = l.bal + pen;
+  if (ECO.cash < tot) return 'cassa insufficiente (servono ' + eur(tot) + ')';
+  ECO.cash -= tot; ECO.led.int += pen; ECO.day.int += pen;
+  F.loans = F.loans.filter(x => x !== l);
+  soe(null, 'FONDI: prestito #' + id + ' estinto in anticipo · ' + eur(tot) + ' (penale ' + eur(pen) + ')', 2);
+  return '';
+}
+function grantCheck(amt) {
+  if (!ECO.on || ECO.over) return 'gestione non attiva';
+  const F = ECO.fin, now = S.tc || 0;
+  if (FIN.grantAmts.indexOf(amt) < 0) return 'importo non previsto dal bando';
+  if (F.req.some(x => x.k === 'grant')) return 'domanda già in valutazione';
+  if (F.grant && F.grant.vinc > 0) return 'prima impiega il contributo già ricevuto';
+  if (now < F.nextGrant) return 'il prossimo bando apre tra ' + Math.ceil((F.nextGrant - now) / 3600) + ' h di orologio';
+  return '';
+}
+function grantAsk(amt) {
+  const why = grantCheck(amt); if (why) return why;
+  const now = S.tc || 0;
+  ECO.fin.req.push({ id: ++ECO.fin.n, k: 'grant', amt, t0: now, tReady: now + FIN.grantH * 3600 });
+  soe(null, 'FONDI: domanda di contributo per la transizione energetica (' + eur(amt) + ') presentata: esito tra ' + FIN.grantH + ' h', 2);
+  return '';
+}
+function grantDecide(rq) {
+  const F = ECO.fin, now = S.tc || 0, q = finQuality();
+  const share = q >= FIN.grantQ[0] ? 1 : q >= FIN.grantQ[1] ? 0.6 : 0;
+  if (!share) { F.nextGrant = now + 86400; soe(null, 'FONDI: domanda di contributo RESPINTA — qualità del servizio ' + (q * 100).toFixed(1) + '% (minimo ' + FIN.grantQ[1] * 100 + '%). Nuovo bando tra 24 h', 3); S.hint = { t: S.t, el: null, msg: 'Contributo respinto: qualità del servizio troppo bassa' }; return; }
+  const a = Math.round(rq.amt * share / 1000) * 1000;
+  ECO.cash += a; ECO.led.con += a; ECO.day.con += a;
+  F.grant = { amt: a, vinc: a, tEnd: now + FIN.grantDays * 86400 };
+  F.nextGrant = now + (FIN.grantDays + FIN.grantCool) * 86400;
+  soe(null, 'FONDI: contributo APPROVATO ' + eur(a) + (share < 1 ? ' (60% del richiesto: qualità del servizio ' + (q * 100).toFixed(1) + '%)' : '') + ' — da impiegare in FV, accumuli o cavi entro ' + FIN.grantDays + ' giorni', 2);
+  S.hint = { t: S.t, el: null, msg: 'Contributo approvato: ' + eur(a) + ' da investire in rinnovabili entro ' + FIN.grantDays + ' giorni' };
+}
+function advCheck() {
+  if (!ECO.on || ECO.over) return 'gestione non attiva';
+  if (ECO.fin.adv) return 'anticipo già in corso (restano ' + eur(ECO.fin.adv.bal) + ')';
+  if (ECO.cash >= FIN.advCash) return 'concesso solo con cassa sotto ' + eur(FIN.advCash);
+  return '';
+}
+function advAsk() {
+  const why = advCheck(); if (why) return why;
+  const fee = Math.round(FIN.advAmt * FIN.advFee);
+  ECO.cash += FIN.advAmt - fee; ECO.led.int += fee; ECO.day.int += fee;
+  ECO.fin.adv = { amt: FIN.advAmt, bal: FIN.advAmt };
+  soe(null, 'FONDI: anticipo di emergenza ' + eur(FIN.advAmt) + ' (commissione ' + eur(fee) + '), restituito con il ' + FIN.advKeep * 100 + '% dei ricavi', 2);
+  return '';
+}
+/* esiti delle richieste e scadenza dei vincoli (a ogni passo economico) */
+function finStep() {
+  const F = ECO.fin, now = S.tc || 0;
+  if (F.req.length) F.req = F.req.filter(rq => {
+    if (now < rq.tReady) return true;
+    if (rq.k === 'loan') {
+      const R = finRating();
+      if (R.g === 'D') { soe(null, 'FONDI: la banca ha RESPINTO il prestito: merito di credito sceso a ' + R.sc + '/100', 3); S.hint = { t: S.t, el: null, msg: 'Prestito respinto dalla banca' }; return false; }
+      ECO.cash += rq.amt - rq.fee; ECO.led.int += rq.fee; ECO.day.int += rq.fee;
+      F.loans.push({ id: rq.id, amt: rq.amt, bal: rq.amt, r: rq.r, days: rq.days, left: rq.days });
+      soe(null, 'FONDI: prestito EROGATO ' + eur(rq.amt) + ' (commissione ' + eur(rq.fee) + ') · ' + rq.days + ' rate a mezzanotte', 2);
+      S.hint = { t: S.t, el: null, msg: 'Prestito erogato: ' + eur(rq.amt) };
+    } else if (rq.k === 'grant') grantDecide(rq);
+    return false;
+  });
+  const G = F.grant;
+  if (G && now >= G.tEnd) {
+    if (G.vinc > 0) { ECO.cash -= G.vinc; ECO.led.con -= G.vinc; ECO.day.con -= G.vinc; soe(null, 'FONDI: vincolo scaduto — restituiti ' + eur(G.vinc) + ' di contributo non impiegato', 3); }
+    F.grant = null;
+  }
+}
+/* rate dei prestiti, alla chiusura della giornata */
+function finDaily() {
+  const F = ECO.fin; let pay = 0, int = 0;
+  F.loans = F.loans.filter(l => {
+    const i = l.bal * l.r, p = Math.min(l.bal, l.amt / l.days);
+    l.bal -= p; l.left--; int += i; pay += p + i;
+    if (l.bal < 1 || l.left <= 0) { pay += Math.max(0, l.bal); l.bal = 0; soe(null, 'FONDI: prestito #' + l.id + ' rimborsato per intero', 1); return false; }
+    return true;
+  });
+  if (pay > 0) { ECO.cash -= pay; ECO.led.int += int; ECO.day.int += int; soe(null, 'FONDI: addebitata la rata dei prestiti ' + eur(pay) + ' (di cui interessi ' + eur(int) + ')', 2); }
+}
+const finNextPay = () => ECO.fin.loans.reduce((a, l) => a + (l.left <= 1 ? l.bal : Math.min(l.bal, l.amt / l.days)) + l.bal * l.r, 0);
 
 /* ---------------- modifiche della rete a simulazione in corso ---------------- */
 function netAddPV(I, kwp) {
@@ -277,14 +417,14 @@ function netAddCable(a, b) {
 function ecoSave() {
   return { v: 1, net: NET_CFG.net, cash: ECO.cash, led: ECO.led, day: ECO.day, days: ECO.days, done: ECO.done, plan: ECO.plan, hist: ECO.hist,
     proj: ECO.proj.map(p => ({ sp: p.sp, label: p.label, cost: p.cost, left: p.tEnd - (S.tc || 0), dur: p.tEnd - p.t0 })),
-    clk: S.clk, doy: S.doy, tc: S.tc || 0,
+    clk: S.clk, doy: S.doy, tc: S.tc || 0, fin: ECO.fin,
     ems: S.isl.map(I => [I.id, { on: I.ems.on, uc: I.ems.uc, n1: I.ems.n1, rPct: I.ems.rPct, rPv: I.ems.rPv }]),
     soc: S.bess.map(B => [B.id, B.soc, B.mode]) };
 }
 function ecoRestore(sv) {
   S.tc = sv.tc || 0;
   (sv.done || []).forEach(sp => { ecoApply(sp); ECO.done.push(sp); });
-  Object.assign(ECO, { cash: sv.cash, led: Object.assign(ledZero(), sv.led), day: Object.assign(ledZero(), sv.day), days: sv.days || [], plan: sv.plan || {}, hist: sv.hist || [] });
+  Object.assign(ECO, { cash: sv.cash, led: Object.assign(ledZero(), sv.led), day: Object.assign(ledZero(), sv.day), days: sv.days || [], plan: sv.plan || {}, hist: sv.hist || [], fin: Object.assign(finInit(), sv.fin || {}) });
   ECO.proj = (sv.proj || []).map(p => ({ id: ++ECO.pN, sp: p.sp, label: p.label, cost: p.cost, t0: S.tc - (p.dur - p.left), tEnd: S.tc + p.left }));
   ECO.proj.forEach(p => { if (p.sp.k === 'dslUp' && S.byId[p.sp.id]) { S.byId[p.sp.id].blocked = true; S.byId[p.sp.id].lastTrip = 'cantiere: potenziamento in corso'; } });
   (sv.ems || []).forEach(([id, e]) => { const I = S.islById[id]; if (I) Object.assign(I.ems, e); });

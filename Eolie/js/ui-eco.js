@@ -9,7 +9,7 @@ const E_ = fn => { const i = EGT.length; EGT.push(fn); return `<span data-e="${i
 const ECV = (fn, h) => { const i = EGT.length; EGT.push(fn); return `<canvas data-ec="${i}" style="height:${h}px"></canvas>`; };
 const eurK = v => (v < 0 ? '−' : '') + '€ ' + (Math.abs(v) >= 10000 ? (Math.abs(v) / 1000).toFixed(0) + 'k' : Math.round(Math.abs(v)).toLocaleString('it-IT'));
 const ecoMargin = () => { const R = ECO.rate || {}; return (R.ric || 0) - (R.gas || 0) - (R.om || 0) - (R.bess || 0) - (R.imp || 0) - (R.pen || 0); };
-const dayNet = d => d.ric + d.ven - d.gas - d.om - d.bess - d.sq - d.imp - d.pen;
+const dayNet = ledNet;
 function updE(root, arr) {
   if (!root) return;
   const EG = arr;
@@ -63,6 +63,7 @@ function buildEco() {
     <div class="ecash"><small>Cassa</small><b>${E_(() => [eur(ECO.cash), ECO.cash < 0 ? 'al' : ECO.cash < 10000 ? 'wa' : ''])}</b><span>${E_(() => { const m = ecoMargin(); return [(m >= 0 ? '▲ ' : '▼ ') + eur(m) + ' all\'ora in questo momento', m >= 0 ? 'ok' : 'al']; })}</span></div>
     <div class="eacts">
       <button class="btn hi" data-a="ecoBuild">${ICO('build')} Cantiere</button>
+      <button class="btn" data-a="ecoFunds">${ICO('euro')} Fondi</button>
       <button class="btn" data-a="ecoPlan">${ICO('battery')} Piano accumuli</button>
       <button class="btn" data-a="ecoEms">${ICO('gear')} Strategia di esercizio</button>
       <button class="btn" data-a="ecoDays">${ICO('list')} Giornate</button>
@@ -78,17 +79,19 @@ function buildEco() {
     tile('Energia non fornita', () => [Math.round(D().ens) + ' kWh', D().ens > 1 ? 'al' : ''], () => 'penale ' + PRICE.ens.toFixed(2) + ' €/kWh') +
     `</div>
   <div class="panelgrid">
-    <div class="dbox"><h5>Conto economico</h5>${E_(() => ({ html: '<table class="dt"><tr><td></td><td class="n" style="color:var(--dim)">oggi</td><td class="n" style="color:var(--dim)">dall\'inizio</td></tr>' + LED_KEYS.map(k => { const pos = k === 'ric' || k === 'ven', f = v => Math.round(v) === 0 ? '0' : (pos ? '' : '−') + Math.round(v).toLocaleString('it-IT'); return `<tr><td>${LED_NM[k]}</td><td class="n ${pos ? 'ok' : ''}">${f(ECO.day[k])}</td><td class="n">${f(L[k])}</td></tr>`; }).join('') + `<tr class="tot"><td><b>Margine operativo</b></td><td class="n"><b>${eur(dayNet(ECO.day))}</b></td><td class="n"><b>${eur(dayNet(L))}</b></td></tr></table>` }))}</div>
+    <div class="dbox"><h5>Conto economico</h5>${E_(() => ({ html: '<table class="dt"><tr><td></td><td class="n" style="color:var(--dim)">oggi</td><td class="n" style="color:var(--dim)">dall\'inizio</td></tr>' + LED_KEYS.map(k => { const pos = !!LED_POS[k], f = v => Math.round(v) === 0 ? '0' : (pos ? '' : '−') + Math.round(v).toLocaleString('it-IT'); return `<tr><td>${LED_NM[k]}</td><td class="n ${pos ? 'ok' : ''}">${f(ECO.day[k])}</td><td class="n">${f(L[k])}</td></tr>`; }).join('') + `<tr class="tot"><td><b>Margine operativo</b></td><td class="n"><b>${eur(dayNet(ECO.day))}</b></td><td class="n"><b>${eur(dayNet(L))}</b></td></tr></table>` }))}</div>
     <div class="dbox"><h5>Andamento della cassa</h5>${ECV(cashChart, 150)}<p class="note">Un punto ogni 15 minuti di orologio. Le cadute verticali sono gli investimenti.</p></div>
     <div class="dbox wide"><h5>Isole</h5>${islTable()}</div>
     <div class="dbox"><h5>Cantieri in corso</h5>${E_(() => ({ html: projList() }))}</div>
+    <div class="dbox"><h5>Finanziamenti</h5>${E_(() => ({ html: finSummary() }))}<div class="row" style="margin-top:6px"><button class="btn sm" data-a="ecoFunds">Chiedi fondi</button></div></div>
     <div class="dbox"><h5>Consigli</h5>${E_(() => ({ html: ecoTips().map(t => `<div class="tip">${esc(t)}</div>`).join('') || '<p class="note">Tutto in ordine: il servizio è regolare e il parco è sfruttato bene.</p>' }))}</div>
     <div class="dbox"><h5>Come si guadagna</h5><ul class="elist">
       <li><b>Ricavi</b>: ${PRICE.tariff.toFixed(2)} €/kWh fornito, ridotti se la frequenza esce da ±0,2 Hz (−15%) o da ±0,5 Hz (−40%), se la tensione di sbarra esce da ±8% (−10%) o se la cabina è a bassa tensione.</li>
       <li><b>Gasolio</b>: ${PRICE.fuel.toFixed(2)} €/l. Un gruppo poco carico consuma di più per ogni kWh: meglio pochi gruppi ben caricati, senza rinunciare alla riserva.</li>
       <li><b>Manutenzione</b>: ${PRICE.omDsl} €/MWh dai diesel e ${PRICE.start} € per avviamento; accumuli ${PRICE.bessWear} €/MWh scambiato; squadra ${PRICE.crew} € a intervento.</li>
       <li><b>Penale</b>: ${PRICE.ens.toFixed(2)} €/kWh di energia non fornita, oltre al mancato incasso. Sotto ${eur(ECO_BANKRUPT)} di cassa la gestione fallisce.</li>
-      <li><b>Investimenti</b>: quota a carico del gestore al netto dei contributi pubblici. FV ${BUILD.pvKwp} €/kWp, accumuli ${BUILD.bessKw} €/kW + ${BUILD.bessKwh} €/kWh, diesel ${BUILD.dslKw} €/kW, cavi ${eur(BUILD.cableFix)} + ${eur(BUILD.cableKm)}/km.</li></ul></div>
+      <li><b>Investimenti</b>: quota a carico del gestore al netto dei contributi pubblici. FV ${BUILD.pvKwp} €/kWp, accumuli ${BUILD.bessKw} €/kW + ${BUILD.bessKwh} €/kWh, diesel ${BUILD.dslKw} €/kW, cavi ${eur(BUILD.cableFix)} + ${eur(BUILD.cableKm)}/km.</li>
+      <li><b>Fondi</b>: prestiti bancari secondo il merito di credito (rate a mezzanotte), contributi pubblici da impiegare in rinnovabili entro ${FIN.grantDays} giorni, anticipo di emergenza con cassa sotto ${eur(FIN.advCash)}.</li></ul></div>
   </div></div>`;
   $('eco').innerHTML = h;
   updE($('eco'), EG);
@@ -133,7 +136,8 @@ function ecoTips() {
     if (on.length >= 2 && ld < 0.33) T.push('A ' + I.nm + ' ' + on.length + ' gruppi lavorano al ' + Math.round(ld * 100) + '% della potenza: a basso carico consumano di più per kWh. Valuta di ridurre la riserva (Strategia di esercizio) o di fermare a mano un gruppo.');
     I.bess.forEach(B => { if (B.soc > 96 && I.pv.P < 0.9 * I.pv.Pav) T.push(B.nm + ' è carico: il surplus FV si spreca. Un accumulo più capiente (Cantiere) o una scarica anticipata (Piano accumuli) aiutano.'); });
   });
-  if (ECO.cash < 10000 && ECO.cash > ECO_BANKRUPT) T.push('Cassa bassa: rimanda gli investimenti e risparmia gasolio finché il margine non torna positivo.');
+  if (ECO.cash < 10000 && ECO.cash > ECO_BANKRUPT) T.push('Cassa bassa: rimanda gli investimenti e risparmia gasolio finché il margine non torna positivo, oppure chiedi fondi (prestito o anticipo di emergenza).');
+  const GR = ECO.fin && ECO.fin.grant; if (GR && GR.vinc > 0) T.push('Hai ' + eur(GR.vinc) + ' di contributo da impiegare in FV, accumuli o cavi entro ' + Math.max(0, (GR.tEnd - (S.tc || 0)) / 3600).toFixed(0) + ' h, altrimenti va restituito.');
   return T.slice(0, 5);
 }
 ACT.ecoIsl = p => { selectEl(S.islById[p]); openRight(); };
@@ -152,7 +156,7 @@ function buyBtn(sp, lab) {
 function ecoBuildModal() {
   EGM = []; EGT = EGM;
   const isls = UI.ecoIsl ? [S.islById[UI.ecoIsl]] : S.isl;
-  let h = `<div class="ebuild"><div class="ecashm">Cassa disponibile: <b>${E_(() => eur(ECO.cash))}</b> · cantieri aperti ${E_(() => ECO.proj.length)}/6${UI.ecoIsl ? ` · <button class="btn sm" data-a="ecoBuild">tutte le isole</button>` : ''}</div>
+  let h = `<div class="ebuild"><div class="ecashm">Cassa disponibile: <b>${E_(() => eur(ECO.cash))}</b> · cantieri aperti ${E_(() => ECO.proj.length)}/6${E_(() => { const G = ECO.fin && ECO.fin.grant; return { html: G && G.vinc > 0 ? ' · <span class="wa">contributo da impiegare in rinnovabili ' + eur(G.vinc) + '</span>' : '' }; })} · <button class="btn sm" data-a="ecoFunds">Fondi</button>${UI.ecoIsl ? ` · <button class="btn sm" data-a="ecoBuild">tutte le isole</button>` : ''}</div>
     <div class="dsel">${BT.map(t => `<button data-a="ecoTab" data-p="${t[0]}" class="${UI.ecoTab === t[0] ? 'on' : ''}">${t[1]}</button>`).join('')}</div>`;
   if (UI.ecoTab === 'pv') {
     h += '<p class="note">Il nuovo FV si distribuisce sulle cabine dell\'isola in proporzione ai carichi, con inverter conformi alla CEI 0-21. Lavori: ' + BUILD.pvH + ' h. Più FV è utile solo se la rete riesce ad assorbirlo: guarda la colonna «limitato».</p><table class="dt"><tr style="color:var(--dim)"><td>isola</td><td class="n">installato</td><td class="n">picco domanda</td><td class="n">FV ora / disp.</td><td class="n">limitato</td><td>aggiungi</td></tr>' +
@@ -216,6 +220,101 @@ ACT.ecoScrap = (p, btn) => {
   ecoBuildModal();
 };
 
+/* ---------------- fondi: prestiti, contributi, anticipo ---------------- */
+UI.finAmt = 50000; UI.finDays = 7; UI.grAmt = 100000;
+const hLeft = t => { const s = Math.max(0, t - (S.tc || 0)); return s >= 3600 ? (s / 3600).toFixed(1) + ' h' : Math.ceil(s / 60) + ' min'; };
+const gCls = g => g === 'A' ? 'ok' : g === 'D' ? 'al' : 'wa';
+function finSummary() {
+  if (!ECO.fin) return '';
+  const F = ECO.fin, R = finRating(), L = [];
+  L.push(`<tr><td>Merito di credito</td><td class="n ${gCls(R.g)}"><b>${R.g}</b> · ${R.sc}/100</td></tr>`);
+  L.push(`<tr><td>Debito residuo</td><td class="n">${eur(finDebt())}</td></tr>`);
+  if (F.loans.length) L.push(`<tr><td>Prossima rata (mezzanotte)</td><td class="n">${eur(finNextPay())}</td></tr>`);
+  L.push(`<tr><td>Fido disponibile</td><td class="n">${eur(R.lim)}</td></tr>`);
+  F.req.forEach(r => L.push(`<tr><td>${r.k === 'loan' ? 'Prestito in istruttoria' : 'Contributo in valutazione'} · ${eur(r.amt)}</td><td class="n wa">esito tra ${hLeft(r.tReady)}</td></tr>`));
+  if (F.grant && F.grant.vinc > 0) L.push(`<tr><td>Contributo da impiegare</td><td class="n wa">${eur(F.grant.vinc)} · ${hLeft(F.grant.tEnd)}</td></tr>`);
+  if (F.adv) L.push(`<tr><td>Anticipo da restituire</td><td class="n">${eur(F.adv.bal)}</td></tr>`);
+  return '<table class="dt">' + L.join('') + '</table>';
+}
+function ratingHtml() {
+  const R = finRating(), sg = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(0);
+  return `<table class="dt"><tr><td>Base</td><td class="n">40</td></tr>
+    <tr><td>Qualità del servizio ${(R.q * 100).toFixed(1)}%</td><td class="n ${R.pq >= 0 ? 'ok' : 'al'}">${sg(R.pq)}</td></tr>
+    <tr><td>Risultato medio giornaliero ${eur(R.m)}${ECO.days.length ? ' (ultimi ' + Math.min(3, ECO.days.length) + ' giorni)' : ' (stima, nessun bilancio chiuso)'}</td><td class="n ${R.pm >= 0 ? 'ok' : 'al'}">${sg(R.pm)}</td></tr>
+    <tr><td>Debito residuo ${eur(R.debt)}</td><td class="n ${R.pd > 0 ? 'al' : ''}">${sg(-R.pd)}</td></tr>
+    ${R.pc ? `<tr><td>Cassa negativa</td><td class="n al">−${R.pc}</td></tr>` : ''}
+    <tr class="tot"><td><b>Punteggio</b></td><td class="n"><b class="${gCls(R.g)}">${R.sc}/100 · classe ${R.g}</b></td></tr></table>
+    <p class="note">Classe A da 70, B da 50, C da 35; sotto 35 la banca non presta. Fido: ${FIN.mult.A}× / ${FIN.mult.B}× / ${FIN.mult.C}× il risultato medio giornaliero (minimo ${eur(30000)}), meno il debito già in essere.</p>`;
+}
+function ecoFundsModal() {
+  EGM = []; EGT = EGM;
+  const F = ECO.fin;
+  const pick = (act, vals, cur, fmt) => vals.map(v => `<button class="btn sm ${v === cur ? 'on' : ''}" data-a="${act}" data-p="${v}">${fmt(v)}</button>`).join('');
+  let h = `<div class="ebuild"><div class="ecashm">Cassa: <b>${E_(() => eur(ECO.cash))}</b> · debito residuo <b>${E_(() => eur(finDebt()))}</b> · merito di credito <b>${E_(() => { const R = finRating(); return [R.g + ' (' + R.sc + '/100)', gCls(R.g)]; })}</b></div>`;
+  /* prestito bancario */
+  h += `<div class="sec"><h5><span>Prestito bancario</span><span>${E_(() => 'fido disponibile ' + eur(finRating().lim))}</span></h5><div class="bd">
+    <p class="note">Ricevi il capitale dopo ${FIN.bankH} h di istruttoria (commissione ${FIN.fee * 100}%). Lo restituisci in rate giornaliere a mezzanotte: quota di capitale più interessi sul debito residuo. Il tasso dipende dal merito di credito.</p>
+    <div class="row"><span class="note">Importo</span>${pick('finAmt', FIN.loanAmts, UI.finAmt, eurK)}</div>
+    <div class="row"><span class="note">Durata</span>${pick('finDays', FIN.loanDays, UI.finDays, d => d + ' giorni')}</div>
+    <div class="row">${E_(() => { const q = loanQuote(UI.finAmt, UI.finDays); return { html: `<span class="note">Interesse ${(q.r * 100).toFixed(2)}% al giorno · prima rata ≈ <b>${eur(q.first)}</b> · interessi totali ≈ ${eur(q.int)} · commissione ${eur(q.fee)}</span>` }; })}</div>
+    <div class="row"><button class="btn go" data-a="finLoan">Richiedi il prestito</button>${E_(() => { const w = loanCheck(UI.finAmt, UI.finDays); return [w ? 'Non disponibile: ' + w : '', 'note wa']; })}</div>
+    ${E_(() => ({ html: F.loans.length ? '<table class="dt" style="margin-top:6px"><tr style="color:var(--dim)"><td>prestito</td><td class="n">residuo</td><td class="n">rate</td><td class="n">tasso</td><td></td></tr>' + F.loans.map(l => `<tr><td>#${l.id} · ${eur(l.amt)}</td><td class="n">${eur(l.bal)}</td><td class="n">${l.left} di ${l.days}</td><td class="n">${(l.r * 100).toFixed(2)}%/g</td><td><button class="btn sm" data-a="finPayoff" data-p="${l.id}" title="Estinzione anticipata con penale dell'${FIN.payoff * 100}%">Estingui · ${eurK(l.bal * (1 + FIN.payoff))}</button></td></tr>`).join('') + '</table>' : '' }))}
+  </div></div>`;
+  /* contributo pubblico */
+  h += `<div class="sec"><h5><span>Contributo pubblico per la transizione energetica delle isole minori</span></h5><div class="bd">
+    <p class="note">Contributo a fondo perduto, valutato in ${FIN.grantH} h di orologio. Approvato per intero se la qualità del servizio è almeno ${FIN.grantQ[0] * 100}%, al 60% se è almeno ${FIN.grantQ[1] * 100}%, respinto sotto. Va impiegato in fotovoltaico, accumuli, cavi o collegamento con la Sicilia entro ${FIN.grantDays} giorni: la parte non spesa si restituisce. Un bando ogni ${FIN.grantDays + FIN.grantCool} giorni.</p>
+    <div class="row"><span class="note">Importo</span>${pick('grAmt', FIN.grantAmts, UI.grAmt, eurK)}</div>
+    <div class="row"><button class="btn go" data-a="finGrant">Presenta la domanda</button>${E_(() => { const w = grantCheck(UI.grAmt); return [w ? 'Non disponibile: ' + w : 'qualità del servizio attuale ' + (finQuality() * 100).toFixed(1) + '%', w ? 'note wa' : 'note']; })}</div>
+    ${E_(() => ({ html: F.grant && F.grant.vinc > 0 ? `<p class="note">Contributo ricevuto ${eur(F.grant.amt)}: restano <b class="wa">${eur(F.grant.vinc)}</b> da impiegare entro ${hLeft(F.grant.tEnd)} di orologio. Apri il <a data-a="ecoBuild">Cantiere</a>.</p>` : '' }))}
+  </div></div>`;
+  /* anticipo di emergenza */
+  h += `<div class="sec"><h5><span>Anticipo di emergenza sull'integrazione tariffaria</span></h5><div class="bd">
+    <p class="note">Solo con cassa sotto ${eur(FIN.advCash)}. Ricevi subito ${eur(FIN.advAmt)} (commissione ${FIN.advFee * 100}%) e lo restituisci senza interessi: viene trattenuto il ${FIN.advKeep * 100}% dei ricavi finché non è saldato. Pesa sul merito di credito come un debito.</p>
+    <div class="row"><button class="btn wa" data-a="finAdv">Chiedi l'anticipo</button>${E_(() => { const w = advCheck(); return [w ? 'Non disponibile: ' + w : '', 'note']; })}</div>
+  </div></div>`;
+  h += `<div class="sec"><h5><span>Come la banca valuta il gestore</span></h5><div class="bd">${E_(() => ({ html: ratingHtml() }))}</div></div></div>`;
+  modal('Richiesta fondi', h);
+  updE($('mBody'), EGM);
+  UI.ecoModal = 'funds';
+}
+function finArm(btn, txt) {
+  if (btn.dataset.armed) return true;
+  btn.dataset.armed = '1'; btn._lab = btn.innerHTML; btn.classList.add('armed'); btn.textContent = txt;
+  setTimeout(() => { if (btn.isConnected && btn.dataset.armed) { delete btn.dataset.armed; btn.innerHTML = btn._lab; btn.classList.remove('armed'); } }, 4000);
+  return false;
+}
+ACT.ecoFunds = () => ecoFundsModal();
+ACT.finAmt = p => { UI.finAmt = +p; ecoFundsModal(); };
+ACT.finDays = p => { UI.finDays = +p; ecoFundsModal(); };
+ACT.grAmt = p => { UI.grAmt = +p; ecoFundsModal(); };
+ACT.finLoan = (p, btn) => {
+  const w = loanCheck(UI.finAmt, UI.finDays); if (w) { toast('Non si può: ' + w); return; }
+  if (!finArm(btn, 'Confermi il prestito di ' + eur(UI.finAmt) + ' in ' + UI.finDays + ' giorni?')) return;
+  const why = loanAsk(UI.finAmt, UI.finDays);
+  if (why) toast('Non si può: ' + why); else { toast('Richiesta inviata alla banca: risposta tra ' + FIN.bankH + ' h di orologio', true); ecoAutosave(); }
+  ecoFundsModal();
+};
+ACT.finPayoff = (p, btn) => {
+  if (!finArm(btn, 'Confermi l\'estinzione?')) return;
+  const why = loanPayoff(+p);
+  if (why) toast('Non si può: ' + why); else { toast('Prestito estinto', true); ecoAutosave(); }
+  ecoFundsModal();
+};
+ACT.finGrant = (p, btn) => {
+  const w = grantCheck(UI.grAmt); if (w) { toast('Non si può: ' + w); return; }
+  if (!finArm(btn, 'Confermi la domanda di ' + eur(UI.grAmt) + '?')) return;
+  const why = grantAsk(UI.grAmt);
+  if (why) toast('Non si può: ' + why); else { toast('Domanda presentata: esito tra ' + FIN.grantH + ' h di orologio', true); ecoAutosave(); }
+  ecoFundsModal();
+};
+ACT.finAdv = (p, btn) => {
+  const w = advCheck(); if (w) { toast('Non si può: ' + w); return; }
+  if (!finArm(btn, 'Confermi l\'anticipo di ' + eur(FIN.advAmt) + '?')) return;
+  const why = advAsk();
+  if (why) toast('Non si può: ' + why); else { toast('Anticipo accreditato: ' + eur(FIN.advAmt - FIN.advAmt * FIN.advFee), true); ecoAutosave(); }
+  ecoFundsModal();
+};
+
 /* ---------------- piano degli accumuli ---------------- */
 ACT.ecoPlan = () => ecoPlanModal();
 function ecoPlanModal() {
@@ -260,7 +359,7 @@ ACT.ecoEms = () => {
 ACT.ecoDays = () => {
   const L = ECO.days.slice().reverse();
   modal('Giornate di gestione', L.length ? '<table class="dt"><tr style="color:var(--dim)"><td>giorno</td><td class="n">ricavi</td><td class="n">gasolio</td><td class="n">altri costi</td><td class="n">investimenti</td><td class="n">margine</td><td class="n">rinnovabile</td><td class="n">qualità</td><td class="n">non fornita</td></tr>' +
-    L.map(d => `<tr><td>${dateStr(d.doy)}</td><td class="n">${eur(d.ric)}</td><td class="n">${eur(d.gas)}</td><td class="n">${eur(d.om + d.bess + d.sq + d.imp + d.pen)}</td><td class="n">${eur(d.inv)}</td><td class="n ${d.net >= 0 ? 'ok' : 'al'}"><b>${eur(d.net)}</b></td><td class="n">${(d.re * 100).toFixed(0)}%</td><td class="n">${(d.qm * 100).toFixed(1)}%</td><td class="n">${Math.round(d.ens)} kWh</td></tr>`).join('') + '</table>' : '<p class="note">Nessuna giornata ancora chiusa: il riepilogo compare a mezzanotte (orologio della simulazione). Puoi accelerare il tempo con i pulsanti 60× e 120× in alto.</p>');
+    L.map(d => `<tr><td>${dateStr(d.doy)}</td><td class="n">${eur(d.ric)}</td><td class="n">${eur(d.gas)}</td><td class="n">${eur(d.om + d.bess + d.sq + d.imp + d.pen + (d.int || 0) - (d.con || 0))}</td><td class="n">${eur(d.inv)}</td><td class="n ${d.net >= 0 ? 'ok' : 'al'}"><b>${eur(d.net)}</b></td><td class="n">${(d.re * 100).toFixed(0)}%</td><td class="n">${(d.qm * 100).toFixed(1)}%</td><td class="n">${Math.round(d.ens)} kWh</td></tr>`).join('') + '</table>' : '<p class="note">Nessuna giornata ancora chiusa: il riepilogo compare a mezzanotte (orologio della simulazione). Puoi accelerare il tempo con i pulsanti 60× e 120× in alto.</p>');
   UI.ecoModal = null;
 };
 
@@ -269,7 +368,7 @@ ACT.gameMode = () => {
   $('menuBox').classList.add('hidden');
   const sv = saveGet(), net = NET_CFG.net;
   const netSel = `<div class="pset"><label>Rete di partenza</label><span><select id="gmNet"><option value="rinnovabile" ${net === 'rinnovabile' ? 'selected' : ''}>Rinnovabile — FV che copre il picco, accumulo su ogni isola</option><option value="storico" ${net === 'storico' ? 'selected' : ''}>Storica — poco FV e pochi accumuli: costruisci tu la transizione</option></select></span></div>`;
-  let h = `<div class="welcome"><p class="lead">Nella <b>modalità gestione</b> sei il gestore delle reti delle Eolie: incassi per ogni kWh fornito, in proporzione alla qualità del servizio, e paghi gasolio, manutenzione e penali. Con il margine apri cantieri: impianti fotovoltaici, accumuli, nuovi gruppi diesel, cavi tra le isole e perfino il collegamento con la Sicilia. Decidi tu come usare gli accumuli e quanta riserva tenere accesa.</p>`;
+  let h = `<div class="welcome"><p class="lead">Nella <b>modalità gestione</b> sei il gestore delle reti delle Eolie: incassi per ogni kWh fornito, in proporzione alla qualità del servizio, e paghi gasolio, manutenzione e penali. Con il margine, e con i fondi che riesci a ottenere da banche ed enti pubblici, apri cantieri: impianti fotovoltaici, accumuli, nuovi gruppi diesel, cavi tra le isole e perfino il collegamento con la Sicilia. Decidi tu come usare gli accumuli e quanta riserva tenere accesa.</p>`;
   if (!ECO.on) {
     h += netSel + `<div class="wcards"><button class="wcard" data-a="gmNew"><span>${ICO('euro')}</span><b>Nuova partita</b><small>Capitale iniziale ${eur(ECO_START_CASH)}</small></button>` +
       (sv ? `<button class="wcard" data-a="gmResume"><span>${ICO('play')}</span><b>Continua la partita</b><small>Cassa ${eur(sv.cash)} · ${dateStr(sv.doy)} · rete ${sv.net}</small></button>` : '') + '</div>';
