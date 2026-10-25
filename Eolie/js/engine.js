@@ -575,7 +575,7 @@ function genStep(G, dt) {
     if (G.st === 'RAFFREDDAMENTO') { ep = 1 - w; ei = ep; }
     else if (!onLine || G.st === 'ACCELERAZIONE') { ep = fr - w; ei = ep; }
     else if (G.st === 'SCARICO') { G.unloadTgt = Math.max(0.05, (G.unloadTgt === undefined ? pef : G.unloadTgt) - dt * 0.08); ep = Math.min(0, 1.04 - w) * 5; ei = 0.4 * (G.unloadTgt - pef) + ep; }
-    else if (G.mode === 'ISO') { ep = fr - w; ei = (fr - w) + G.kls * ((A.isoShare || 0) - pef); }
+    else if (G.mode === 'ISO') { if (G.soft < 1) G.soft = Math.min(1, G.soft + dt / 12); const tgt = (A.isoShare || 0) * (G.soft < 1 ? G.soft : 1); ep = fr - w; ei = (fr - w) + G.kls * (tgt - pef); }
     else if (G.mode === 'DROOP') { ep = (fr - w) - G.R * (pef - G.Pset / G.Pn); ei = ep; }
     else { ep = Math.min(0, 1.03 - w) * 6 + Math.max(0, 0.96 - w) * 6; ei = 0.3 * (G.Pset / G.Pn - pef) + ep; }
     if (G.fault.govHunt) ep += 0.07 * Math.sin(2 * Math.PI * 0.55 * S.t);
@@ -832,7 +832,8 @@ function fastStep(dt) {
   for (const b of S.bess) bessStep(b, dt);
   /* quote di ripartizione isocrona per area */
   for (const A of S.areas) {
-    let p = 0, pn = 0; for (const g of A.gens) if (g.mode === 'ISO' && g.st === 'IN PARALLELO') { p += g.pef * g.Pn; pn += g.Pn; }
+    let p = 0, pn = 0; for (const g of A.gens) if (g.mode === 'ISO' && g.st === 'IN PARALLELO' && !(g.soft < 1)) { p += g.pef * g.Pn; pn += g.Pn; }
+    if (!pn) for (const g of A.gens) if (g.mode === 'ISO' && g.st === 'IN PARALLELO') { p += g.pef * g.Pn; pn += g.Pn; }
     A.isoShare = pn > 0 ? p / pn : 0;
   }
   faultsEnergize();

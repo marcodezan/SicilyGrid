@@ -161,6 +161,44 @@ function pvSwitch(I, on) {
 }
 function pvNode(N, on) { if (!comOk(N, 'OP')) return false; N.pvOff = !on; soe(N.isl, 'FV cabina ' + N.nm + (on ? ' riconnesso' : ' distaccato'), 1, N); return true; }
 
+/* perché il FV non eroga tutto il disponibile: elenco delle cause con i kW persi */
+function pvWhy(I) {
+  const P = I.pv, av = P.Pav, out = [];
+  if (av < 0.002) return [{ t: P.irr < 5 ? 'notte: nessun irraggiamento' : 'irraggiamento troppo basso', kw: 0 }];
+  const offN = I.nodes.filter(N => N.pvOff).reduce((a, N) => a + N.Pav, 0);
+  const dark = I.nodes.filter(N => !N.live || !N.fuse || !N.lvBrk).reduce((a, N) => a + (N.pvOff ? 0 : N.Pav), 0);
+  const base = av - offN - dark;
+  if (P.opOff) out.push({ t: 'telescatto degli inverter comandato dall\'operatore', kw: base });
+  else {
+    P.groups.forEach(g => {
+      if (g.frac <= 0) return;
+      if (!g.on) {
+        const b = I.buses[0], ok = b.live && b.fm > 49.9 && b.fm < 50.1 && b.Vm > 0.9 && b.Vm < 1.1;
+        out.push({ t: 'inverter ' + (g.fmin > 49 ? 'con tarature storiche' : 'CEI 0-21') + ' distaccati (' + g.why + ') · ' + (ok ? 'rientro tra ' + Math.max(0, Math.ceil(20 - g.rcT)) + ' s' : 'in attesa di frequenza 49,9–50,1 Hz e tensione regolare'), kw: base * g.frac });
+      } else {
+        if (g.ramp < 1) out.push({ t: 'inverter in rientro graduale (' + fmtP0(g.ramp) + ')', kw: base * g.frac * (1 - g.ramp) });
+        if (g.lfsmK !== undefined && g.lfsmK < 0.99) out.push({ t: 'riduzione automatica per sovrafrequenza (> 50,2 Hz)', kw: base * g.frac * g.ramp * (1 - g.lfsmK) });
+      }
+    });
+    const onShare = P.groups.reduce((a, g) => a + g.frac * (g.on ? g.ramp * (g.lfsmK === undefined ? 1 : g.lfsmK) : 0), 0);
+    if (P.curt < 0.999) out.push({ t: 'limite di immissione impostato dall\'operatore (' + fmtP0(P.curt) + ')', kw: base * onShare * (1 - P.curt) });
+    if (P.curtEms < 0.999) out.push({ t: 'limitazione dell\'automazione (EMS) per tenere i diesel sopra il minimo tecnico', kw: base * onShare * P.curt * (1 - P.curtEms) });
+  }
+  if (offN > 0.0005) out.push({ t: 'FV distaccato su ' + I.nodes.filter(N => N.pvOff).length + ' cabine', kw: offN });
+  if (dark > 0.0005) out.push({ t: 'cabine non alimentate (il FV si stacca con la rete)', kw: dark });
+  return out.filter(x => x.kw > 0.003 || x.kw === 0);
+}
+const fmtP0 = x => Math.round(x * 100) + '%';
+function pvReconnectNow(I) {
+  if (!comOk(I, 'OP')) return false;
+  const b = I.buses[0];
+  if (!b.live || b.fm < 49.8 || b.fm > 50.2) { S.lastRefuse = { t: S.t, id: I.id, msg: 'frequenza o tensione fuori dai limiti di riconnessione' }; return false; }
+  I.pv.opOff = false;
+  I.pv.groups.forEach(g => { if (!g.on && g.frac > 0) { g.on = true; g.ramp = 0; g.tripT = 0; } });
+  soe(I.id, 'FV ' + I.nm + ': riconnessione immediata degli inverter comandata dall\'operatore (rampa)', 1, I);
+  return true;
+}
+
 /* stima del carico che si riprende chiudendo: cabine dalla posizione k fino al primo IMS aperto (carico freddo, FV ancora staccato) */
 function nodeEst(N) { const [P] = nodeLoad(N, hourNow(), 0); return P / 1000 * (1 + 0.45 * Math.min(1, N.offT / 2700)) / (1 + N.clpA); }
 function sectionEst(F, k) { let e = 0; for (let i = k; i < F.nodes.length; i++) { if (i > k) { const sw = F.segs[i].sw; if (sw && (!sw.closed || sw.tmr > 0)) break; } const N = F.nodes[i]; if (!N.live) e += nodeEst(N); } return e; }
@@ -324,7 +362,7 @@ function emsStep(dt) {
         else E.tHigh = 0;
       }
       /* limitazione FV con batteria piena */
-      if (E.pvCurt) { S.isl.filter(x => A.isl.indexOf(x.id) >= 0).forEach(x => { if ((soc > 94 && gfm.some(b => b.P < -0.02 * b.Pn)) || (A.f > 50.3 && soc > 90)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.1 * dt); else if (soc < 91 || gfm.some(b => b.P > 0.02 * b.Pn)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.05 * dt); }); }
+      if (E.pvCurt) { S.isl.filter(x => A.isl.indexOf(x.id) >= 0 && !x.pv.man).forEach(x => { if ((soc > 94 && gfm.some(b => b.P < -0.02 * b.Pn)) || (A.f > 50.3 && soc > 90)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.1 * dt); else if (soc < 91 || gfm.some(b => b.P > 0.02 * b.Pn)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.05 * dt); }); }
     } else {
       /* isola alimentata da gruppi diesel */
       const isls = S.isl.filter(x => A.isl.indexOf(x.id) >= 0), pvA = isls.reduce((a, x) => a + x.pv.P, 0);
@@ -378,7 +416,7 @@ function emsStep(dt) {
       /* limitazione FV per minimo tecnico dei diesel, solo se gli accumuli non possono assorbire altro */
       if (E.pvCurt) {
         const room = E.bess && st.B.some(b => b.mode === 'GFL' && b.auto && b.soc < (E.socMax || 95) - 1 && b.Pset > -0.95 * b.Pn * (b.fault.derate ? 0.5 : 1));
-        isls.forEach(x => { if (ld < 0.25 || (ld < 0.33 && !room)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (ld > 0.41 || (room && ld > 0.36)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.03 * dt); });
+        isls.forEach(x => { if (x.pv.man) { x.pv.curtEms = 1; return; } if (ld < 0.25 || (ld < 0.33 && !room)) x.pv.curtEms = Math.max(0, x.pv.curtEms - 0.04 * dt); else if (ld > 0.41 || (room && ld > 0.36)) x.pv.curtEms = Math.min(1, x.pv.curtEms + 0.03 * dt); });
         isls.forEach(x => { if (x.pv.curtEms < 0.98 && !x._curtLog) { x._curtLog = true; soe(x.id, 'EMS ' + x.nm + ': limitazione del FV per tenere i diesel sopra il minimo tecnico', 1, x); } else if (x.pv.curtEms >= 0.999) x._curtLog = false; });
       }
     }

@@ -157,6 +157,7 @@ function brkChanged(b, closed) {
   if (o.el === 'gen') {
     const dphi = Math.abs(wrapPi(o.d - o.bus.th)) * 180 / Math.PI, live = o.bus.live && o.bus.Vm > 0.1;
     o.closePhi = live ? dphi : 0;
+    o.soft = live ? 0 : 1; /* presa di carico graduale dopo il parallelo */
     if (live && dphi > 60) { o.fault.shaft = true; soe(o.isl, o.nm + ': PARALLELO FUORI FASE (Δφ = ' + dphi.toFixed(0) + '°) — coppia di urto, danno meccanico al giunto', 3, o); alarmRaise('shaft.' + o.id, 3, o.nm + ' danno meccanico (parallelo fuori fase)', o.isl, o); o.shaftT = 0.5; }
     else if (live && dphi > 20) soe(o.isl, o.nm + ': parallelo con Δφ = ' + dphi.toFixed(0) + '° — sollecitazione elevata', 2, o);
     if (!live) soe(o.isl, o.nm + ': chiusura su sbarra morta (rimessa in tensione)', 2, o);
