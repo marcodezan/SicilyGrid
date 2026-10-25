@@ -136,9 +136,33 @@ function settings() {
     ${SEC('Rete delle isole', PSET(`<label>Configurazione</label><span><select id="stNet"><option value="rinnovabile" ${NET_CFG.net === 'rinnovabile' ? 'selected' : ''}>Rinnovabile (FV che copre il picco, accumulo su ogni isola)</option><option value="storico" ${NET_CFG.net === 'storico' ? 'selected' : ''}>Storica (poco FV, pochi accumuli)</option></select></span>`) + ROW('<button class="btn" data-a="setNet">Applica e riavvia</button>') + '<p class="note">Nella rete rinnovabile il FV di ogni isola, a mezzogiorno con cielo sereno, copre il picco di domanda della giornata; gli accumuli spostano il surplus verso la sera.</p>')}
     ${SEC('Prestazioni', KV('<span>Fotogrammi al secondo</span><b>' + PERF.fps.toFixed(0) + '</b>', '<span>Simulazione per fotogramma</span><b>' + simLoad.toFixed(1) + ' ms</b>', '<span>Lavoro totale per fotogramma</span><b>' + frameCost.toFixed(1) + ' ms</b>') + ROW(`<button class="btn ${UI.lowGfx ? 'on' : ''}" data-a="gfx">${UI.lowGfx ? 'Grafica ridotta: ATTIVA' : 'Attiva la grafica ridotta'}</button>`) + '<p class="note">La grafica ridotta toglie nuvole e flussi animati dalla mappa e ridisegna schema e mappa meno spesso: la simulazione elettrica resta identica. Si attiva da sola se per 15 secondi si scende sotto 24 fotogrammi al secondo.</p>')}
     ${SEC('Simulazione', ROW('<button class="btn dg" data-a="restart">Riavvia da capo</button>') + '<p class="note">Il riavvio ricostruisce rete e stato iniziale (ore 11:30 del 10 agosto)' + (ECO.on ? ' e fa ripartire da zero la partita di gestione' : '') + '.</p>')}
+    ${SEC('Amministrazione', admHtml())}
     </div></div>`);
   document.querySelectorAll('#mBody input[data-pk], #mBody select[data-pk]').forEach(n => { const v = getPK(n.dataset.pk); if (n.type === 'checkbox') n.checked = !!v; else n.value = v; });
 }
+/* ---------- amministrazione (password) ---------- */
+try { UI.admin = sessionStorage.getItem('eolie.adm') === '1'; } catch (e) { UI.admin = false; }
+function admHtml() {
+  if (!UI.admin) return PSET('<label>Password</label><span><input id="admPw" type="password" autocomplete="off" style="width:120px"> <button class="btn sm" data-a="admUnlock">Sblocca</button></span>') + '<p class="note">Comandi riservati per la modalità gestione: tempi di costruzione e fondi.</p>';
+  if (!ECO.on) return '<p class="note">Sbloccato. Questi comandi agiscono sulla partita di gestione: avviala dal menu (Modalità gestione).</p>' + ROW('<button class="btn sm" data-a="admLock">Blocca</button>');
+  const sp = ECO.adm.speed, opt = [[1, 'normali'], [2, '× 2 più rapidi'], [5, '× 5 più rapidi'], [10, '× 10 più rapidi'], [0, 'istantanei']];
+  return PSET(`<label>Tempi di costruzione</label><span><select id="admSp">${opt.map(o => `<option value="${o[0]}" ${o[0] === sp ? 'selected' : ''}>${o[1]}</option>`).join('')}</select> <button class="btn sm" data-a="admSpeed">Applica</button></span>`,
+    `<label>Cantieri aperti (${ECO.proj.length})</label><span><button class="btn sm" data-a="admFinish" ${ECO.proj.length ? '' : 'disabled'}>Completa ora</button></span>`,
+    `<label>Fondi (cassa ${eur(ECO.cash)})</label><span><input id="admEur" type="number" step="1000" value="100000" style="width:110px"> € <button class="btn sm" data-a="admAdd">Aggiungi</button> <button class="btn sm" data-a="admSet">Imposta cassa</button></span>`) +
+    '<p class="note">La nuova velocità vale anche per i cantieri già aperti. Le modifiche alla cassa non entrano nel conto economico.</p>' + ROW('<button class="btn sm" data-a="admLock">Blocca</button>');
+}
+const admRe = (why, ok) => { if (why) toast('Non si può: ' + why); else { toast(ok, true); if (typeof ecoAutosave === 'function') ecoAutosave(); } settings(); };
+ACT.admUnlock = () => {
+  const n = $('admPw'); if (!n) return;
+  if (!admOk(n.value)) { n.value = ''; toast('Password errata'); return; }
+  UI.admin = true; try { sessionStorage.setItem('eolie.adm', '1'); } catch (e) { }
+  toast('Amministrazione sbloccata', true); settings();
+};
+ACT.admLock = () => { UI.admin = false; try { sessionStorage.removeItem('eolie.adm'); } catch (e) { } settings(); };
+ACT.admSpeed = () => { const v = +$('admSp').value; admRe(admSpeed(v), v === 0 ? 'Cantieri istantanei' : v === 1 ? 'Tempi di costruzione normali' : 'Cantieri ' + v + ' volte più rapidi'); };
+ACT.admFinish = () => admRe(admFinishAll(), 'Cantieri completati');
+ACT.admAdd = () => admRe(admCash(+$('admEur').value, 'add'), 'Fondi aggiunti');
+ACT.admSet = () => admRe(admCash(+$('admEur').value, 'set'), 'Cassa impostata');
 ACT.setTime = () => {
   const t = $('stTime').value.split(':'), d = new Date($('stDate').value);
   let doy = S.doy;

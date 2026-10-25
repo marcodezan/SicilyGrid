@@ -46,7 +46,7 @@ const ledZero = () => { const o = {}; LED_KEYS.forEach(k => { o[k] = 0; }); o.kw
 })();
 
 function ecoStart(save) {
-  Object.assign(ECO, { on: true, cash: ECO_START_CASH, led: ledZero(), day: ledZero(), days: [], proj: [], done: [], plan: {}, rate: ledZero(), hist: [], over: false, pN: 0, crewN0: S.crewN || 0, starts: {}, doy: S.doy, tc0: S.tc || 0, fin: finInit() });
+  Object.assign(ECO, { on: true, cash: ECO_START_CASH, led: ledZero(), day: ledZero(), days: [], proj: [], done: [], plan: {}, rate: ledZero(), hist: [], over: false, pN: 0, crewN0: S.crewN || 0, starts: {}, doy: S.doy, tc0: S.tc || 0, fin: finInit(), adm: { speed: 1 } });
   S.gens.forEach(G => { ECO.starts[G.id] = G.starts || 0; });
   if (S.byId.CRT) S.byId.CRT.notBuilt = true;
   S.set.randF = 1;
@@ -182,12 +182,13 @@ function ecoBuy(sp) {
   const why = ecoCheck(sp); if (why) return why;
   const q = ecoQuote(sp);
   ECO.cash -= q.cost; ECO.led.inv += q.cost; ECO.day.inv += q.cost;
-  const p = { id: ++ECO.pN, sp, label: q.label, cost: q.cost, t0: S.tc || 0, tEnd: (S.tc || 0) + q.h * 3600 };
+  const sp0 = ECO.adm.speed, hh = sp0 ? q.h / sp0 : 0;
+  const p = { id: ++ECO.pN, sp, label: q.label, cost: q.cost, t0: S.tc || 0, tEnd: (S.tc || 0) + hh * 3600 };
   ECO.proj.push(p);
   const GR = ECO.fin.grant;
   if (GR && GR.vinc > 0 && GREEN.indexOf(sp.k) >= 0) { GR.vinc = Math.max(0, GR.vinc - q.cost); if (GR.vinc <= 0) soe(null, 'FONDI: contributo pubblico interamente impiegato in opere per la transizione', 1); }
   if (sp.k === 'dslUp') { const G = S.byId[sp.id]; G.blocked = true; G.lastTrip = 'cantiere: potenziamento in corso'; }
-  soe(sp.isl || null, 'CANTIERE avviato: ' + q.label + ' · ' + eur(q.cost) + ' · fine lavori tra ' + q.h + ' h di orologio', 2);
+  soe(sp.isl || null, 'CANTIERE avviato: ' + q.label + ' · ' + eur(q.cost) + (hh ? ' · fine lavori tra ' + (Math.round(hh * 10) / 10) + ' h di orologio' : ' · lavori istantanei'), 2);
   return '';
 }
 function ecoProjects() {
@@ -357,6 +358,36 @@ function finDaily() {
   });
   if (pay > 0) { ECO.cash -= pay; ECO.led.int += int; ECO.day.int += int; soe(null, 'FONDI: addebitata la rata dei prestiti ' + eur(pay) + ' (di cui interessi ' + eur(int) + ')', 2); }
 }
+/* ---------------- amministrazione (sbloccata con password dalle Impostazioni) ---------------- */
+const ADM_H = 1457261338; /* impronta FNV-1a della password */
+function admHash(s) { let h = 0x811c9dc5; for (const c of String(s).trim().replace(',', '.')) { h ^= c.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h; }
+const admOk = pw => admHash(pw) === ADM_H;
+/* velocità dei cantieri: 1 = normale, 2/5/10 = più rapidi, 0 = istantanei; ricalcola anche quelli aperti */
+function admSpeed(v) {
+  if (!ECO.on) return 'nessuna partita di gestione in corso';
+  v = +v; if (!(v === 0 || v >= 1)) return 'velocità non valida';
+  const old = ECO.adm.speed, now = S.tc || 0;
+  ECO.proj.forEach(p => { const left = Math.max(0, p.tEnd - now); p.tEnd = now + (v === 0 ? 0 : old === 0 ? 0 : left * old / v); });
+  ECO.adm.speed = v;
+  soe(null, 'AMMINISTRAZIONE: tempi di costruzione ' + (v === 0 ? 'azzerati' : v === 1 ? 'normali' : 'ridotti a 1/' + v), 2);
+  return '';
+}
+function admFinishAll() {
+  if (!ECO.on) return 'nessuna partita di gestione in corso';
+  if (!ECO.proj.length) return 'nessun cantiere aperto';
+  const now = S.tc || 0; ECO.proj.forEach(p => { p.tEnd = now; });
+  ecoProjects();
+  return '';
+}
+/* fondi: 'add' aggiunge (anche negativo), 'set' imposta la cassa */
+function admCash(v, mode) {
+  if (!ECO.on) return 'nessuna partita di gestione in corso';
+  v = +v; if (!Number.isFinite(v)) return 'importo non valido';
+  const c0 = ECO.cash; ECO.cash = mode === 'set' ? v : ECO.cash + v;
+  if (ECO.cash >= ECO_BANKRUPT && ECO.over) { ECO.over = false; ECO.overShown = false; }
+  soe(null, 'AMMINISTRAZIONE: cassa ' + eur(c0) + ' → ' + eur(ECO.cash), 2);
+  return '';
+}
 const finNextPay = () => ECO.fin.loans.reduce((a, l) => a + (l.left <= 1 ? l.bal : Math.min(l.bal, l.amt / l.days)) + l.bal * l.r, 0);
 
 /* ---------------- modifiche della rete a simulazione in corso ---------------- */
@@ -417,14 +448,14 @@ function netAddCable(a, b) {
 function ecoSave() {
   return { v: 1, net: NET_CFG.net, cash: ECO.cash, led: ECO.led, day: ECO.day, days: ECO.days, done: ECO.done, plan: ECO.plan, hist: ECO.hist,
     proj: ECO.proj.map(p => ({ sp: p.sp, label: p.label, cost: p.cost, left: p.tEnd - (S.tc || 0), dur: p.tEnd - p.t0 })),
-    clk: S.clk, doy: S.doy, tc: S.tc || 0, fin: ECO.fin,
+    clk: S.clk, doy: S.doy, tc: S.tc || 0, fin: ECO.fin, adm: ECO.adm,
     ems: S.isl.map(I => [I.id, { on: I.ems.on, uc: I.ems.uc, n1: I.ems.n1, rPct: I.ems.rPct, rPv: I.ems.rPv }]),
     soc: S.bess.map(B => [B.id, B.soc, B.mode]) };
 }
 function ecoRestore(sv) {
   S.tc = sv.tc || 0;
   (sv.done || []).forEach(sp => { ecoApply(sp); ECO.done.push(sp); });
-  Object.assign(ECO, { cash: sv.cash, led: Object.assign(ledZero(), sv.led), day: Object.assign(ledZero(), sv.day), days: sv.days || [], plan: sv.plan || {}, hist: sv.hist || [], fin: Object.assign(finInit(), sv.fin || {}) });
+  Object.assign(ECO, { cash: sv.cash, led: Object.assign(ledZero(), sv.led), day: Object.assign(ledZero(), sv.day), days: sv.days || [], plan: sv.plan || {}, hist: sv.hist || [], fin: Object.assign(finInit(), sv.fin || {}), adm: Object.assign({ speed: 1 }, sv.adm || {}) });
   ECO.proj = (sv.proj || []).map(p => ({ id: ++ECO.pN, sp: p.sp, label: p.label, cost: p.cost, t0: S.tc - (p.dur - p.left), tEnd: S.tc + p.left }));
   ECO.proj.forEach(p => { if (p.sp.k === 'dslUp' && S.byId[p.sp.id]) { S.byId[p.sp.id].blocked = true; S.byId[p.sp.id].lastTrip = 'cantiere: potenziamento in corso'; } });
   (sv.ems || []).forEach(([id, e]) => { const I = S.islById[id]; if (I) Object.assign(I.ems, e); });
